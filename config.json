@@ -1,0 +1,65 @@
+{
+    "asr_provider": "funasr",
+    "funasr": {
+        "model_dir": "iic/SenseVoiceSmall"
+    },
+    "gemini": {
+        "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
+        "model": "gemini-2.5-flash"
+    },
+    "asr_validation": {
+        "enable": false,
+        "wer_threshold": 0.15
+    },
+    "mos_filter": {
+        "strategy": "fixed",
+        "fixed_threshold": 3.15
+    },
+    "output_format": "libritts", 
+    "language": {
+        "multilingual": true,
+        "supported": [
+            "zh",
+            "en",
+            "fr",
+            "ja",
+            "ko",
+            "de"
+        ]
+    },
+    "embedding_refinement": {
+        "enable": true,
+        "eres2net_model_path": "ckpts/pretrained_eres2netv2.ckpt"
+    },
+    "diarization_provider": "pyannote",
+    "3d-speaker": {
+        "model_id": "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
+    },
+    "entrypoint": {
+        "input_folder_path": "examples",
+        "SAMPLE_RATE": 24000
+    },
+    "paraformer": {
+        "model_dir": "paraformer-zh",
+        "model_revision": "v2.0.4"
+    },
+    "speaker_diarization": {
+        "local_model_path": "/path/to/models/pyannote/speaker-diarization-3.1",
+        "model_id": "damo/speech_diarization_telelspeech_16k_meeting"
+    },
+    "separate": {
+        "step1": {
+            "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
+            "denoise": true,
+            "margin": 44100,
+            "chunks": 15,
+            "n_fft": 6144,
+            "dim_t": 8,
+            "dim_f": 3072
+        }
+    },
+    "mos_model": {
+        "primary_model_path": "ckpts/sig_bak_ovr.onnx"
+    },
+    "huggingface_token": "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"
+}

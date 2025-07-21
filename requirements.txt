@@ -1,0 +1,34 @@
+# Core AI/ML Framework
+torch
+torchaudio
+
+# Diarization & Speaker Verification
+# Using a specific version of pyannote.audio for stability.
+# This will pull pyannote.core, pyannote.pipeline, etc. as dependencies.
+pyannote.audio
+modelscope[audio]
+# Explicitly add dependencies that caused issues before
+addict
+datasets
+einops
+scikit-learn
+
+# ASR Models
+# openai-whisper
+# google-generativeai
+funasr
+
+# Audio Processing & File Handling
+librosa
+pydub
+soundfile
+pandas
+openpyxl
+
+# MFA & ASR Validation
+# jiwer
+# praatio
+
+# Utilities
+tqdm
+pyyaml
