@@ -4,16 +4,34 @@ import random
 import csv
 import math
 
-def create_manifest(podcast_names, total_count, base_podcast_path, output_path):
+def create_manifest(podcast_names, total_count, base_podcast_path, output_path, exclude_manifests=None):
     """
     Selects a total number of episodes distributed evenly across the given podcasts
-    and generates a CSV manifest.
+    and generates a CSV manifest, excluding episodes from previous manifests.
     """
     print("Starting manifest creation...")
     print(f"Base podcast directory: {base_podcast_path}")
     print(f"Target total episodes: {total_count}")
 
-    # 1. Discover available episodes for each podcast
+    # 0. Load exclusion list from previous manifests
+    exclusion_set = set()
+    if exclude_manifests:
+        print("\n--- Loading Exclusion Manifests ---")
+        for manifest_path in exclude_manifests:
+            try:
+                with open(manifest_path, 'r', newline='', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    # Assumes the column is named 'FilePath'
+                    excluded_files = {row['FilePath'] for row in reader if 'FilePath' in row}
+                    print(f"  [*] Loaded {len(excluded_files)} entries to exclude from '{manifest_path}'")
+                    exclusion_set.update(excluded_files)
+            except FileNotFoundError:
+                print(f"  [!] Warning: Exclusion manifest not found, skipping: {manifest_path}")
+            except Exception as e:
+                print(f"  [!] Error reading exclusion manifest '{manifest_path}': {e}")
+        print(f"--- Total unique episodes to exclude: {len(exclusion_set)} ---")
+
+    # 1. Discover available episodes for each podcast, filtering out excluded ones
     podcasts_info = []
     for name in podcast_names:
         podcast_dir = os.path.join(base_podcast_path, name)
@@ -22,20 +40,27 @@ def create_manifest(podcast_names, total_count, base_podcast_path, output_path):
             continue
         
         try:
-            episodes = [f for f in os.listdir(podcast_dir) if f.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4'))]
-            if episodes:
+            available_episodes = []
+            all_potential_episodes = [f for f in os.listdir(podcast_dir) if f.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4'))]
+            
+            for episode_name in all_potential_episodes:
+                full_path = os.path.abspath(os.path.join(podcast_dir, episode_name))
+                if full_path not in exclusion_set:
+                    available_episodes.append(episode_name)
+
+            if available_episodes:
                 podcasts_info.append({
                     "name": name,
-                    "available_count": len(episodes),
-                    "episodes": episodes
+                    "available_count": len(available_episodes),
+                    "episodes": available_episodes
                 })
             else:
-                print(f"\n[!] Warning: No audio files found for podcast '{name}', skipping.")
+                print(f"\n[!] Warning: No new audio files found for podcast '{name}', skipping.")
         except Exception as e:
             print(f"\n[!] Error processing directory for '{name}': {e}")
 
     if not podcasts_info:
-        print("\nNo podcasts with available episodes found. Manifest will not be created.")
+        print("\nNo podcasts with available new episodes found. Manifest will not be created.")
         return
 
     # 2. Allocate counts intelligently
@@ -128,6 +153,12 @@ if __name__ == "__main__":
         default="manifest.csv",
         help="The name of the output CSV manifest file."
     )
+    parser.add_argument(
+        "--exclude_manifests",
+        nargs='+',
+        default=[],
+        help="Optional. A list of existing manifest CSV files to exclude from selection."
+    )
     args = parser.parse_args()
 
-    create_manifest(args.podcasts, args.total_count, args.base_dir, args.output_file) 
+    create_manifest(args.podcasts, args.total_count, args.base_dir, args.output_file, args.exclude_manifests) 

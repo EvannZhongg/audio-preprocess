@@ -222,7 +222,7 @@ def main_process_wrapper(manifest_entry, output_folder):
     return main_process(audio_path, podcast_name, episode_name, save_path=save_path)
 
 
-def append_to_report(report_path, podcast_name, episode_name, initial_duration, final_duration):
+def append_to_report(report_path, podcast_name, episode_name, file_path, initial_duration, final_duration):
     """
     Appends a new row to the processing report CSV file.
     Creates the file and writes the header if it doesn't exist.
@@ -237,6 +237,7 @@ def append_to_report(report_path, podcast_name, episode_name, initial_duration, 
             writer.writerow([
                 "PodcastName", 
                 "EpisodeName", 
+                "FilePath",
                 "InitialDuration(s)", 
                 "FinalDuration(s)", 
                 "RetentionRate(%)"
@@ -245,6 +246,7 @@ def append_to_report(report_path, podcast_name, episode_name, initial_duration, 
         writer.writerow([
             podcast_name, 
             episode_name, 
+            file_path,
             f"{initial_duration:.2f}", 
             f"{final_duration:.2f}", 
             f"{retention_rate:.2f}"
@@ -1003,6 +1005,7 @@ def main_process(audio_path, podcast_name, episode_name, save_path=None):
             report_path="processing_report.csv",
             podcast_name=podcast_name,
             episode_name=episode_name,
+            file_path=audio_path,
             initial_duration=processing_stats['initial']['duration'],
             final_duration=processing_stats['final']['duration']
         )
