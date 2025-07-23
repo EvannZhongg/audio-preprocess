@@ -4,115 +4,154 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import multiprocessing
+import csv
+import multiprocessing as mp
 import os
-import subprocess
+import sys
 import time
+from functools import partial
+import pathlib
 
-from utils.logger import Logger
-from utils.tool import get_gpu_nums
+import tqdm
+import torch
+from utils.logger import Logger, time_logger
+from utils.tool import get_audio_files, load_cfg, detect_gpu
+from main import init_worker, main_process_wrapper
 
 
-def run_script(args, gpu_id, self_id):
+def main():
     """
-    Run the script by passing the GPU ID and self ID to environment variables and execute the main.py script.
-
-    Args:
-        gpu_id (int): ID of the GPU.
-        self_id (int): ID of the process.
-
-    Returns:
-        None
+    Main function to orchestrate the multi-GPU processing of audio files.
     """
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    env["SELF_ID"] = str(self_id)
+    # Use 'spawn' for CUDA safety in multiprocessing
+    mp.set_start_method("spawn", force=True)
 
-    command = (
-        f"source {args.conda_path} &&"
-        'eval "$(conda shell.bash hook)" && '
-        f"conda activate {args.conda_env_name} && "
-        "python main.py"
+    parser = argparse.ArgumentParser(description="Multi-GPU Audio Processing Pipeline")
+    parser.add_argument(
+        "--manifest_path",
+        type=str,
+        default=None,
+        help="Path to a CSV manifest file listing audio files to process (priority)."
     )
-
-    try:
-        process = subprocess.Popen(command, shell=True, env=env, executable="/bin/bash")
-        process.wait()
-        logger.info(f"Process for GPU {gpu_id} completed successfully.")
-    except KeyboardInterrupt:
-        logger.warning(f"Multi - GPU {gpu_id}: Interrupted by keyboard, exiting...")
-    except Exception as e:
-        logger.error(f"Error occurred for GPU {gpu_id}: {e}")
-
-
-def main(args, self_id):
-    """
-    Start multiple script tasks using multiple processes, each process using one GPU.
-
-    Args:
-        self_id (str): Identifier for the current process.
-
-    Returns:
-        None
-    """
-    disabled_ids = []
-    if args.disabled_gpu_ids:
-        disabled_ids = [int(i) for i in args.disabled_gpu_ids.split(",")]
-        logger.info(f"CUDA_DISABLE_ID is set, not using: {disabled_ids}")
-
-    gpus_count = get_gpu_nums()
-
-    available_gpus = [i for i in range(gpus_count) if i not in disabled_ids]
-    processes = []
-
-    for gpu_id in available_gpus:
-        process = multiprocessing.Process(
-            target=run_script, args=(args, gpu_id, self_id)
-        )
-        process.start()
-        logger.info(f"GPU {gpu_id}: started...")
-        time.sleep(1)
-        processes.append(process)
-
-    for process in processes:
-        process.join()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--self_id", type=str, default="main_multi", help="Log ID")
+    parser.add_argument(
+        "--input_folder_path",
+        type=str,
+        default=None,
+        help="Path to a folder with audio files (used if manifest is not provided)."
+    )
+    parser.add_argument(
+        "--output_folder",
+        type=str,
+        default="processed_data_multi",
+        help="The root folder where all processed data will be saved."
+    )
+    parser.add_argument(
+        "--config_path", type=str, default="config.json", help="Config file path"
+    )
+    parser.add_argument(
+        "--num_workers_per_gpu",
+        type=int,
+        default=2,
+        help="Number of worker processes to spawn per GPU.",
+    )
     parser.add_argument(
         "--disabled_gpu_ids",
         type=str,
         default="",
-        help="Comma-separated list of disabled GPU IDs, default uses all available GPUs",
+        help="Comma-separated list of disabled GPU IDs (e.g., '0,2').",
     )
-    parser.add_argument(
-        "--conda_path",
-        type=str,
-        default="/opt/conda/etc/profile.d/conda.sh",
-        help="Conda path",
-    )
-    parser.add_argument(
-        "--conda_env_name",
-        type=str,
-        default="AudioPipeline",
-        help="Conda environment name",
-    )
-    parser.add_argument(
-        "--main_command_args",
-        type=str,
-        default="",
-        help="Main command args, check available options by `python main.py --help`",
-    )
+    # Add other relevant arguments from main.py
+    parser.add_argument("--batch_size", type=int, default=8, help="batch size for ASR")
+    parser.add_argument("--compute_type", type=str, default="float16", help="Compute type for Whisper")
+    parser.add_argument("--whisper_arch", type=str, default="medium", help="Whisper model architecture")
+    parser.add_argument("--threads", type=int, default=4, help="CPU threads per worker")
+
     args = parser.parse_args()
+    
+    main_logger = Logger.get_logger("main_multi")
+    main_cfg = load_cfg(args.config_path)
 
-    self_id = args.self_id
-    if "SELF_ID" in os.environ:
-        self_id = f"{self_id}_#{os.environ['SELF_ID']}"
+    # --- GPU Availability Check ---
+    if not detect_gpu() or torch.cuda.device_count() == 0:
+        main_logger.error("No GPUs detected. main_multi.py requires at least one GPU. Exiting.")
+        sys.exit(1)
 
-    logger = Logger.get_logger(self_id)
+    total_gpus = torch.cuda.device_count()
+    disabled_ids = [int(i.strip()) for i in args.disabled_gpu_ids.split(',') if i]
+    available_gpus = [i for i in range(total_gpus) if i not in disabled_ids]
 
-    logger.info(f"Starting main_multi.py with self_id: {self_id}, args: {vars(args)}.")
-    main(args, self_id)
-    logger.info("Exiting main_multi.py...")
+    if not available_gpus:
+        main_logger.error("All GPUs are disabled or unavailable. Exiting.")
+        sys.exit(1)
+
+    main_logger.info(f"Total GPUs: {total_gpus}, Available GPUs for this run: {available_gpus}")
+
+    # --- Input File Discovery ---
+    manifest_entries = []
+    if args.manifest_path:
+        main_logger.info(f"Reading audio manifest from: {args.manifest_path}")
+        try:
+            with open(args.manifest_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                manifest_entries = [row for row in reader]
+        except (FileNotFoundError, IOError) as e:
+            main_logger.error(f"Error reading manifest file: {e}")
+            sys.exit(1)
+    elif args.input_folder_path:
+        main_logger.info(f"Scanning for audio files in: {args.input_folder_path}")
+        if not os.path.isdir(args.input_folder_path):
+            main_logger.error(f"Input folder not found: {args.input_folder_path}")
+            sys.exit(1)
+        
+        audio_paths = get_audio_files(args.input_folder_path)
+        for audio_path in audio_paths:
+            path_parts = pathlib.Path(audio_path).parts
+            podcast_name = path_parts[-2] if len(path_parts) > 1 else "UnknownPodcast"
+            episode_name = os.path.splitext(os.path.basename(audio_path))[0]
+            manifest_entries.append({
+                "PodcastName": podcast_name,
+                "EpisodeName": episode_name,
+                "FilePath": audio_path
+            })
+    else:
+        main_logger.error("Error: You must provide either --manifest_path or --input_folder_path.")
+        sys.exit(1)
+        
+    if not manifest_entries:
+        main_logger.warning("No audio files found to process. Exiting.")
+        sys.exit(0)
+
+    # --- Task Distribution ---
+    num_files = len(manifest_entries)
+    num_gpus = len(available_gpus)
+    files_per_gpu = [[] for _ in range(num_gpus)]
+    for i, file_entry in enumerate(manifest_entries):
+        files_per_gpu[i % num_gpus].append(file_entry)
+
+    main_logger.info(f"Distributing {num_files} files among {num_gpus} GPUs.")
+    for i, gpu_id in enumerate(available_gpus):
+        main_logger.info(f"  - GPU {gpu_id} will process {len(files_per_gpu[i])} files.")
+
+    # Create the main output directory
+    os.makedirs(args.output_folder, exist_ok=True)
+    main_logger.info(f"Processed data will be saved in: {args.output_folder}")
+
+    # --- Process Pool Execution for each GPU ---
+    total_workers = args.num_workers_per_gpu * num_gpus
+    init_args = (main_cfg, args)
+    
+    process_func = partial(main_process_wrapper, output_folder=args.output_folder)
+
+    # We can use a single pool and let the init_worker handle GPU assignment
+    # The worker_id is assigned by the pool, and we use worker_id % num_gpus to assign a GPU
+    # This is exactly how main.py does it.
+    main_logger.info(f"Creating a single process pool with {total_workers} workers for {num_gpus} GPUs.")
+    
+    with mp.Pool(processes=total_workers, initializer=init_worker, initargs=init_args) as pool:
+        results = list(tqdm.tqdm(pool.imap(process_func, manifest_entries), total=num_files))
+
+    main_logger.info("--- All files have been processed by all GPUs. ---")
+
+
+if __name__ == "__main__":
+    main()

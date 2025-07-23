@@ -1,6 +1,8 @@
 import logging
 import re
 from typing import List
+import os
+from filelock import FileLock
 
 import numpy as np
 import torch
@@ -18,13 +20,26 @@ class FunASR:
 
     def __init__(self, model_dir: str, device: str, **kwargs):
         logger.info(f"Loading FunASR model from: {model_dir}")
-        self.model = AutoModel(
-            model=model_dir,
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 30000},
-            device=device,
-            **kwargs,
-        )
+
+        # Use a file lock to prevent race conditions during model download
+        # in a multiprocessing environment.
+        # The lock file is placed in the parent of the model directory to avoid
+        # being part of the model files themselves.
+        lock_dir = os.path.dirname(model_dir)
+        os.makedirs(lock_dir, exist_ok=True)
+        lock_file = os.path.join(lock_dir, f"{os.path.basename(model_dir)}.lock")
+
+        with FileLock(lock_file):
+            logger.debug(f"Acquired lock for FunASR model: {model_dir}")
+            self.model = AutoModel(
+                model=model_dir,
+                vad_model="fsmn-vad",
+                vad_kwargs={"max_single_segment_time": 30000},
+                device=device,
+                **kwargs,
+            )
+        logger.debug(f"Released lock for FunASR model: {model_dir}")
+
         self.emoji_pattern = re.compile(
             "["
             "\U0001F600-\U0001F64F"  # emoticons

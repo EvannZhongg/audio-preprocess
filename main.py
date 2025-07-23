@@ -89,17 +89,31 @@ def init_worker(config, cli_args):
     logger = Logger.get_logger(f"worker_{worker_id}")
 
     # 2. Setup device
-    num_gpus = torch.cuda.device_count() if detect_gpu() else 0
-    if num_gpus > 0:
-        gpu_id = worker_id % num_gpus
-        logger.info(f"Worker {worker_id} using GPU {gpu_id}")
+    if detect_gpu() and torch.cuda.is_available():
+        total_gpus = torch.cuda.device_count()
+        
+        # Check for disabled_gpu_ids attribute for multi-GPU compatibility
+        if hasattr(g_args, 'disabled_gpu_ids') and g_args.disabled_gpu_ids:
+            disabled_ids = [int(i.strip()) for i in g_args.disabled_gpu_ids.split(',') if i]
+            available_gpus = [i for i in range(total_gpus) if i not in disabled_ids]
+            if not available_gpus:
+                raise RuntimeError("All available GPUs are disabled.")
+        else:
+            # Default behavior for main.py or when no GPUs are disabled
+            available_gpus = list(range(total_gpus))
+
+        if not available_gpus:
+             raise RuntimeError("No GPUs available for processing.")
+
+        # Assign worker to an available GPU
+        gpu_id = available_gpus[worker_id % len(available_gpus)]
+        
+        logger.info(f"Worker {worker_id} using GPU {gpu_id} (from available list: {available_gpus})")
         device_name = f"cuda:{gpu_id}"
-        simple_device_name = "cuda"
         device = torch.device(device_name)
     else:
         logger.info(f"Worker {worker_id} using CPU")
         device_name = "cpu"
-        simple_device_name = "cpu"
         device = torch.device(device_name)
         # whisperX expects compute type: int8 on CPU
         logger.info(f"Worker {worker_id} overriding compute type to int8 for CPU.")
@@ -162,12 +176,12 @@ def init_worker(config, cli_args):
 
     # Background Noise Separation
     logger.debug(" * Loading Background Noise Model")
-    separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["step1"], device=simple_device_name)
+    separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["step1"], device=device_name)
 
     # DNSMOS Scoring
     logger.debug(" * Loading DNSMOS Model")
     primary_model_path = cfg["mos_model"]["primary_model_path"]
-    dnsmos_compute_score = dnsmos.ComputeScore(primary_model_path, simple_device_name)
+    dnsmos_compute_score = dnsmos.ComputeScore(primary_model_path, device_name)
 
     # Refinement Model
     refinement_cfg = cfg.get("embedding_refinement", {})

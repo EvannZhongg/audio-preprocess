@@ -74,6 +74,35 @@ python main.py [OPTIONS]
 python main.py --input_folder_path /path/to/audio/files
 ```
 
+## 多 GPU 并行处理
+
+对于拥有多张 GPU 的用户，可以使用 `main_multi.py` 脚本来显著加速处理流程。该脚本会自动将待处理的音频文件平均分配给所有可用的 GPU，并在每张卡上并行运行多个工作进程。
+
+### 使用示例
+
+```bash
+# 使用所有可用的 GPU，在每张卡上运行 2 个工作进程
+python main_multi.py \
+    --input_folder_path /path/to/your/audio/files \
+    --output_folder /path/to/your/processed_data \
+    --num_workers_per_gpu 2
+
+# 假设有4张GPU (0, 1, 2, 3)，禁用 0 号和 3 号卡，只在 1 号和 2 号卡上运行
+python main_multi.py \
+    --input_folder_path /path/to/your/audio/files \
+    --output_folder /path/to/your/processed_data \
+    --num_workers_per_gpu 2 \
+    --disabled_gpu_ids "0,3"
+```
+
+### 主要参数
+
+- `--input_folder_path`: 输入音频文件夹路径。
+- `--manifest_path`: (可选) 指定一个 CSV 清单文件，优先于 `--input_folder_path`。
+- `--output_folder`: 处理结果的输出根目录。
+- `--num_workers_per_gpu`: 指定在**每张** GPU 上启动的工作进程数量（默认：`2`）。
+- `--disabled_gpu_ids`: (可选) 需要禁用的 GPU ID 列表，以逗号分隔（例如, `"0,3"`）。
+
 ## 输出格式
 
 ### 默认格式
@@ -106,7 +135,7 @@ input_folder_processed/
 - AAC (`.aac`)
 - MP4 (`.mp4`)
 
-## Coming Soon 🚀
+## 路线图 🚀
 
-- **Web 界面**：基于 `main_init.py` 的网页版体验界面，支持文件上传和实时进度显示
-- **多 GPU 支持**：基于 `main_multi.py` 的多卡并行处理，大幅提升处理速度
+- **Web 界面**：基于 `main_init.py` 的网页版体验界面，支持文件上传和实时进度显示。
+- **[已完成]** ~~多 GPU 支持：基于 `main_multi.py` 的多卡并行处理，大幅提升处理速度。~~

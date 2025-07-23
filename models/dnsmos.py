@@ -16,6 +16,7 @@ import onnxruntime as ort
 import pandas as pd
 import tqdm
 import warnings
+import re
 
 
 warnings.filterwarnings("ignore")
@@ -43,13 +44,37 @@ class ComputeScore:
         Raises:
             RuntimeError: If the device is not supported.
         """
-        if device == "cuda":
+        sess_options = ort.SessionOptions()
+        
+        if device.startswith("cuda"):
+            match = re.search(r'cuda:(\d+)', device)
+            provider = 'CUDAExecutionProvider'
+            
+            if match:
+                device_id = int(match.group(1))
+                provider_options = [{'device_id': device_id}]
+                self.onnx_sess = ort.InferenceSession(
+                    primary_model_path, 
+                    providers=[provider],
+                    provider_options=provider_options,
+                    sess_options=sess_options,
+                )
+            else:
+                # Default to cuda:0 if no ID is specified
+                self.onnx_sess = ort.InferenceSession(
+                    primary_model_path, 
+                    providers=[provider],
+                    sess_options=sess_options
+                )
+        elif device == "cpu":
+            provider = 'CPUExecutionProvider'
             self.onnx_sess = ort.InferenceSession(
-                primary_model_path, providers=["CUDAExecutionProvider"]
+                primary_model_path, 
+                providers=[provider],
+                sess_options=sess_options
             )
-            print("Using CUDA:", self.onnx_sess.get_providers())
         else:
-            self.onnx_sess = ort.InferenceSession(primary_model_path)
+            raise ValueError(f"Unsupported device: {device}. Must be 'cpu' or 'cuda:n'.")
 
     def audio_melspec(
         self, audio, n_mels=120, frame_size=320, hop_length=160, sr=16000, to_db=True

@@ -12,6 +12,7 @@ import torch
 import numpy as np
 import onnxruntime as ort
 from tqdm import tqdm
+import re
 
 
 class ConvTDFNet:
@@ -134,16 +135,34 @@ class Predictor:
             n_fft=args["n_fft"],
         )
 
-        if device == "cuda":
-            self.model = ort.InferenceSession(
-                args["model_path"], providers=["CUDAExecutionProvider"]
-            )
+        sess_options = ort.SessionOptions()
+
+        if device.startswith("cuda"):
+            match = re.search(r'cuda:(\d+)', device)
+            if match:
+                device_id = int(match.group(1))
+                provider_options = [{'device_id': device_id}]
+                self.model = ort.InferenceSession(
+                    args["model_path"], 
+                    providers=['CUDAExecutionProvider'],
+                    provider_options=provider_options,
+                    sess_options=sess_options,
+                )
+            else:
+                # Default to cuda:0 if no ID is specified
+                self.model = ort.InferenceSession(
+                    args["model_path"], 
+                    providers=["CUDAExecutionProvider"],
+                    sess_options=sess_options,
+                )
         elif device == "cpu":
             self.model = ort.InferenceSession(
-                args["model_path"], providers=["CPUExecutionProvider"]
+                args["model_path"], 
+                providers=["CPUExecutionProvider"],
+                sess_options=sess_options,
             )
         else:
-            raise ValueError("Device must be either 'cuda' or 'cpu'")
+            raise ValueError(f"Unsupported device: {device}. Must be 'cpu' or 'cuda:n'.")
 
     def demix(self, mix):
         """

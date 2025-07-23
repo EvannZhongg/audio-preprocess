@@ -32,3 +32,4 @@ openpyxl
 # Utilities
 tqdm
 pyyaml
+filelock
