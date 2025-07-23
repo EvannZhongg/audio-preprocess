@@ -542,44 +542,66 @@ def refine_vad_list_by_embedding(
     vad_list, audio, refinement_model, feature_extractor, device
 ):
     """
-    Refines the raw VAD list by removing segments that are not internally consistent
-    in their speaker embedding. This is based on the new, more reliable logic.
-
     Args:
-        vad_list (list): The raw list of VAD segments from vad.vad().
-        audio (dict): The audio data.
-        refinement_model: The loaded ERes2NetV2 model for refinement.
-        feature_extractor: The FBank feature extractor for the model.
-        device: The torch device to run the model on.
+        vad_list (list): 从 vad.vad() 得到的原始VAD切片列表。
+        audio (dict): 音频数据。
+        refinement_model: 用于优化的ERes2NetV2模型。
+        feature_extractor: 模型的FBank特征提取器。
+        device: 运行模型的torch设备 (CPU或GPU)。
 
     Returns:
-        list: A new list of VAD segments after filtering out inconsistent ones.
+        list: 经过筛选后，逻辑与旧版本一致的VAD切片新列表。
     """
     from sklearn.metrics.pairwise import cosine_similarity
+    from torch.nn.utils.rnn import pad_sequence
+    import numpy as np
 
     refined_vad_list = []
-    MIN_SEGMENT_DURATION_S = 1.0  # Segments shorter than this are not processed
-    WINDOW_SIZE_S = 1.1  # Window size for consistency check
-    WINDOW_STEP_S = 0.4  # Step for the sliding window
-    # Threshold for cosine similarity. If a window's similarity to the segment's
-    # average embedding is below this, the segment is considered inconsistent.
+    MIN_SEGMENT_DURATION_S = 1.0
+    WINDOW_SIZE_S = 1.1
+    WINDOW_STEP_S = 0.4
     SIMILARITY_THRESHOLD = 0.6
+    MAX_REFINEMENT_BATCH_SIZE = 64 
 
-    def _get_embedding(waveform_segment):
-        """Helper to get embedding from a waveform segment."""
+    def _get_embedding_single(waveform_segment):
         if len(waveform_segment) / audio["sample_rate"] < 0.1:
             return None
         
-        # Resample to 16k for eres2net
         waveform_16k = librosa.resample(
             waveform_segment, orig_sr=audio["sample_rate"], target_sr=16000
         )
         
         features = feature_extractor(torch.tensor(waveform_16k, dtype=torch.float32).to(device))
         with torch.no_grad():
-            # The model expects a batch dimension, so we add one with .unsqueeze(0)
+            # 使用 unsqueeze(0) 创建一个 batch_size=1 的批次
             embedding = refinement_model(features.unsqueeze(0)).cpu().numpy()
         return embedding
+
+    def _get_embeddings_batched(waveforms):
+        if not waveforms:
+            return np.array([])
+
+        all_embeddings = []
+        for i in range(0, len(waveforms), MAX_REFINEMENT_BATCH_SIZE):
+            batch_waveforms = waveforms[i:i + MAX_REFINEMENT_BATCH_SIZE]
+            
+            waveforms_16k = [
+                librosa.resample(wf, orig_sr=audio["sample_rate"], target_sr=16000)
+                for wf in batch_waveforms
+            ]
+
+            feature_tensors = [
+                feature_extractor(torch.tensor(wf, dtype=torch.float32).to(device))
+                for wf in waveforms_16k
+            ]
+            
+            padded_features = pad_sequence(feature_tensors, batch_first=True, padding_value=0.0)
+
+            with torch.no_grad():
+                embeddings_batch = refinement_model(padded_features).cpu().numpy()
+                all_embeddings.append(embeddings_batch)
+        
+        return np.vstack(all_embeddings)
 
     for segment in vad_list:
         duration = segment["end"] - segment["start"]
@@ -587,58 +609,52 @@ def refine_vad_list_by_embedding(
             refined_vad_list.append(segment)
             continue
 
-        # Extract waveform for the whole VAD segment
         start_frame_main = int(segment["start"] * audio["sample_rate"])
         end_frame_main = int(segment["end"] * audio["sample_rate"])
         segment_waveform = audio["waveform"][start_frame_main:end_frame_main]
 
-        # 1. Get the reference (average) embedding for the whole segment
-        reference_embedding = _get_embedding(segment_waveform)
+        # 1. 单独计算参考嵌入，确保逻辑与旧版一致
+        reference_embedding = _get_embedding_single(segment_waveform)
         if reference_embedding is None:
+            # 如果整个片段无法获取embedding，则直接保留
             refined_vad_list.append(segment)
             continue
-        
-        # 2. Use a sliding window to check for internal consistency
-        is_consistent = True
+
+        # 2. 收集所有窗口的波形用于批处理
+        window_waveforms = []
         window_start_s = 0
         while window_start_s + WINDOW_SIZE_S <= duration:
             window_start_frame = int(window_start_s * audio["sample_rate"])
             window_end_frame = int((window_start_s + WINDOW_SIZE_S) * audio["sample_rate"])
             window_waveform = segment_waveform[window_start_frame:window_end_frame]
             
-            window_embedding = _get_embedding(window_waveform)
-            if window_embedding is None:
-                window_start_s += WINDOW_STEP_S
-                continue
+            # 同样进行时长检查
+            if len(window_waveform) / audio["sample_rate"] >= 0.1:
+                window_waveforms.append(window_waveform)
 
-            # 3. Compare window embedding to the reference using Cosine Similarity
-            similarity = cosine_similarity(reference_embedding, window_embedding)[0, 0]
+            window_start_s += WINDOW_STEP_S
+        
+        # 如果没有有效的窗口，则直接保留原片段
+        if not window_waveforms:
+            refined_vad_list.append(segment)
+            continue
 
-            # 4. If similarity is too low, mark as inconsistent and discard
+        # 3. 对所有窗口进行批处理计算
+        window_embeddings = _get_embeddings_batched(window_waveforms)
+        
+        # 4. 逐一比较
+        is_consistent = True
+        for window_embedding in window_embeddings:
+            similarity = cosine_similarity(reference_embedding, window_embedding.reshape(1, -1))[0, 0]
+
             if similarity < SIMILARITY_THRESHOLD:
                 is_consistent = False
                 logger.debug(
                     f"Discarding VAD segment from {segment['start']:.2f}s to {segment['end']:.2f}s "
                     f"due to internal inconsistency. Similarity: {similarity:.2f}"
                 )
-                
-
-                # --- SAVE DISCARDED SEGMENT FOR DEBUGGING ---
-                discarded_save_dir = os.path.join('/data/workspace/vad_segs', "discarded_for_refinement_debug")
-                os.makedirs(discarded_save_dir, exist_ok=True)
-                
-                start_s = segment["start"]
-                end_s = segment["end"]
-                
-                filename = f"inconsistent_dist_{similarity:.2f}_{start_s:.2f}s_to_{end_s:.2f}s.wav"
-                filepath = os.path.join(discarded_save_dir, filename)
-
-                # sf.write(filepath, segment_waveform, audio["sample_rate"])
-
-                break
-            window_start_s += WINDOW_STEP_S
+                break 
         
-        # 5. Only keep segments that are internally consistent
         if is_consistent:
             refined_vad_list.append(segment)
 
