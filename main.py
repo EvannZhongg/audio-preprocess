@@ -26,7 +26,7 @@ from pydub import AudioSegment
 from utils.logger import Logger, time_logger
 from utils.tool import (calculate_audio_stats, check_env, detect_gpu,
                         export_to_libritts, export_to_mp3, get_audio_files,
-                        load_cfg)
+                        load_cfg, filter_manifest_by_report)
 import traceback
 import csv
 import pathlib
@@ -206,7 +206,7 @@ def init_worker(config, cli_args):
     logger.debug(f"Worker {worker_id} finished loading models.")
 
 
-def main_process_wrapper(manifest_entry, output_folder):
+def main_process_wrapper(manifest_entry, output_folder, report_path):
     """
     A wrapper for main_process to be used with pool.map.
     It constructs the save path and passes all necessary info.
@@ -233,7 +233,7 @@ def main_process_wrapper(manifest_entry, output_folder):
     # e.g., output_folder/PodcastName/EpisodeName
     save_path = os.path.join(output_folder, podcast_name, episode_name)
 
-    return main_process(audio_path, podcast_name, episode_name, save_path=save_path)
+    return main_process(audio_path, podcast_name, episode_name, save_path=save_path, report_path=report_path)
 
 
 def append_to_report(report_path, podcast_name, episode_name, file_path, initial_duration, final_duration):
@@ -895,7 +895,7 @@ def filter(mos_list, mos_filter_cfg):
     return final_filtered_list
 
 
-def main_process(audio_path, podcast_name, episode_name, save_path=None):
+def main_process(audio_path, podcast_name, episode_name, save_path=None, report_path="processing_report.csv"):
     """
     Process the audio file. The save_path is now the root for this specific episode.
     """
@@ -1032,14 +1032,14 @@ def main_process(audio_path, podcast_name, episode_name, save_path=None):
     # --- Append to CSV Report ---
     try:
         append_to_report(
-            report_path="processing_report.csv",
+            report_path=report_path,
             podcast_name=podcast_name,
             episode_name=episode_name,
             file_path=audio_path,
             initial_duration=processing_stats['initial']['duration'],
             final_duration=processing_stats['final']['duration']
         )
-        logger.info(f"Appended results for '{episode_name}' to processing_report.csv")
+        logger.info(f"Appended results for '{episode_name}' to {os.path.basename(report_path)}")
     except Exception as e:
         logger.error(f"Failed to append to report for {episode_name}: {e}")
 
@@ -1122,6 +1122,12 @@ if __name__ == "__main__":
         help="The root folder where all processed data will be saved."
     )
     parser.add_argument(
+        "--report_path",
+        type=str,
+        default="processing_report.csv",
+        help="Path to the processing report CSV file for resuming progress.",
+    )
+    parser.add_argument(
         "--config_path", type=str, default="config.json", help="config path"
     )
     parser.add_argument("--batch_size", type=int, default=8, help="batch size")
@@ -1197,6 +1203,12 @@ if __name__ == "__main__":
         main_logger.warning(f"No audio files found to process. Exiting.")
         sys.exit(0)
 
+    # --- Resume from previous run ---
+    manifest_entries = filter_manifest_by_report(manifest_entries, args.report_path)
+    if not manifest_entries:
+        main_logger.info("All files in the manifest have already been processed. Exiting.")
+        sys.exit(0)
+
     # Create the main output directory
     os.makedirs(args.output_folder, exist_ok=True)
     main_logger.info(f"Processed data will be saved in: {args.output_folder}")
@@ -1208,7 +1220,7 @@ if __name__ == "__main__":
     init_args = (main_cfg, args)
     
     # Use partial to pass the fixed output_folder argument to the wrapper
-    process_func = partial(main_process_wrapper, output_folder=args.output_folder)
+    process_func = partial(main_process_wrapper, output_folder=args.output_folder, report_path=args.report_path)
 
     with mp.Pool(processes=num_workers, initializer=init_worker, initargs=init_args) as pool:
         results = list(tqdm.tqdm(pool.imap(process_func, manifest_entries), total=len(manifest_entries)))

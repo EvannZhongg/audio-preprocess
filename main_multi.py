@@ -15,7 +15,7 @@ import pathlib
 import tqdm
 import torch
 from utils.logger import Logger, time_logger
-from utils.tool import get_audio_files, load_cfg, detect_gpu
+from utils.tool import get_audio_files, load_cfg, detect_gpu, filter_manifest_by_report
 from main import init_worker, main_process_wrapper
 
 
@@ -44,6 +44,12 @@ def main():
         type=str,
         default="processed_data_multi",
         help="The root folder where all processed data will be saved."
+    )
+    parser.add_argument(
+        "--report_path",
+        type=str,
+        default="processing_report.csv",
+        help="Path to the processing report CSV file for resuming progress.",
     )
     parser.add_argument(
         "--config_path", type=str, default="config.json", help="Config file path"
@@ -121,6 +127,12 @@ def main():
         main_logger.warning("No audio files found to process. Exiting.")
         sys.exit(0)
 
+    # --- Resume from previous run ---
+    manifest_entries = filter_manifest_by_report(manifest_entries, args.report_path)
+    if not manifest_entries:
+        main_logger.info("All files in the manifest have already been processed. Exiting.")
+        sys.exit(0)
+
     # --- Task Distribution ---
     num_files = len(manifest_entries)
     num_gpus = len(available_gpus)
@@ -140,7 +152,7 @@ def main():
     total_workers = args.num_workers_per_gpu * num_gpus
     init_args = (main_cfg, args)
     
-    process_func = partial(main_process_wrapper, output_folder=args.output_folder)
+    process_func = partial(main_process_wrapper, output_folder=args.output_folder, report_path=args.report_path)
 
     # We can use a single pool and let the init_worker handle GPU assignment
     # The worker_id is assigned by the pool, and we use worker_id % num_gpus to assign a GPU

@@ -350,3 +350,77 @@ def calculate_audio_stats(
             valid_audio_stats.append((idx, duration))
 
     return valid_audio_stats, all_audio_stats
+
+
+def filter_manifest_by_report(manifest_entries, report_path):
+    """
+    Filters a list of manifest entries by removing those already processed,
+    based on a processing report CSV file.
+
+    Args:
+        manifest_entries (list): A list of dictionaries, where each dictionary
+                                 represents a file to be processed and must
+                                 contain 'PodcastName' and 'EpisodeName'.
+        report_path (str): The path to the processing report CSV file.
+
+    Returns:
+        list: A new list of manifest entries containing only the items
+              that have not yet been processed.
+    """
+    logger = Logger.get_logger()
+    total_count_initial = len(manifest_entries)
+
+    if not os.path.exists(report_path):
+        logger.info(
+            f"Processing report '{report_path}' not found. "
+            "Assuming no files have been processed yet."
+        )
+        return manifest_entries
+
+    try:
+        import pandas as pd
+
+        report_df = pd.read_csv(report_path)
+        # Create a set of tuples for quick lookup
+        processed_set = set(
+            zip(report_df["PodcastName"], report_df["EpisodeName"])
+        )
+        logger.info(
+            f"Found {len(processed_set)} entries in the processing report."
+        )
+    except (Exception, ImportError) as e:
+        logger.error(
+            f"Failed to read or parse processing report with pandas: {e}. "
+            "Processing all files as a fallback. Please consider `pip install pandas`."
+        )
+        # Fallback to manual CSV reading if pandas is not available or fails
+        processed_set = set()
+        try:
+            import csv
+            with open(report_path, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if 'PodcastName' in row and 'EpisodeName' in row:
+                        processed_set.add((row['PodcastName'], row['EpisodeName']))
+            logger.info(f"Fallback reader found {len(processed_set)} entries.")
+        except Exception as csv_e:
+            logger.error(f"Fallback CSV reader also failed: {csv_e}. Processing all files.")
+            return manifest_entries
+
+    # Filter the manifest entries
+    unprocessed_entries = [
+        entry
+        for entry in manifest_entries
+        if (entry["PodcastName"], entry["EpisodeName"]) not in processed_set
+    ]
+
+    processed_count = total_count_initial - len(unprocessed_entries)
+
+    if processed_count > 0:
+        logger.info(
+            f"Resuming from report: Total files in manifest = {total_count_initial}, "
+            f"Completed = {processed_count}, Remaining = {len(unprocessed_entries)}. "
+            "Skipping completed files."
+        )
+
+    return unprocessed_entries
