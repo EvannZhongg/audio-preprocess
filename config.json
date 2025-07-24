@@ -13,7 +13,7 @@
     },
     "mos_filter": {
         "strategy": "fixed",
-        "fixed_threshold": 3.15
+        "fixed_threshold": 3.0
     },
     "output_format": "libritts", 
     "language": {
@@ -48,14 +48,23 @@
         "model_id": "damo/speech_diarization_telelspeech_16k_meeting"
     },
     "separate": {
-        "step1": {
+        "enable": true,
+        "provider": "smru",
+        "uvr": {
             "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
-            "denoise": true,
             "margin": 44100,
-            "chunks": 15,
-            "n_fft": 6144,
+            "chunks": 20,
+            "denoise": true,
+            "dim_f": 3072,
             "dim_t": 8,
-            "dim_f": 3072
+            "n_fft": 7680
+        },
+        "smru": {
+            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "chunk_size": 12,
+            "valid_size": 8,
+            "overlap": 1,
+            "batch_size": 4
         }
     },
     "mos_model": {

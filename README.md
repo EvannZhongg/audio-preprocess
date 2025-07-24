@@ -5,7 +5,7 @@
 ## 主要功能
 
 - **音频标准化**：自动调整音频采样率、位深度、声道数和音量
-- **人声背景声分离**：使用深度学习模型分离人声和背景音
+- **人声背景声分离/降噪**：支持 `UVR` (人声/背景声分离) 和 `SMRU` (高性能降噪) 两种模型。**推荐使用 SMRU** 以获得更好的效果。
 - **说话人分离**：基于 pyannote 的说话人日志技术
 - **语音活动检测**：精细化的语音片段检测和优化
 - **自动语音识别**：支持多种 ASR 引擎（Whisper、FunASR、Paraformer）
@@ -24,19 +24,40 @@ bash env.sh
 
 ## 模型文件准备
 
-在运行之前，请确保以下模型文件已下载并放置在 `ckpts/` 目录下（目前先暂存cfs/cfs-du3y2r4h/share/ckpts中，若无法获取私聊bobbsun）：
+在运行之前，请确保以下模型文件已下载并放置在 `audio-preprocess/ckpts/` 目录下（目前先暂存cfs/cfs-du3y2r4h/share/ckpts中，若无法获取私聊bobbsun）：
 
+### 核心模型
 ```
 ckpts/
 ├── pretrained_eres2netv2.ckpt          # ERes2Net 说话人嵌入模型
-├── UVR-MDX-NET-Inst_HQ_3.onnx         # 人声分离模型
 └── sig_bak_ovr.onnx                    # DNSMOS 质量评分模型
+```
+
+### 分离/降噪模型 (根据配置选择)
+
+#### SMRU (推荐)
+这是推荐的高性能降噪模型，能有效去除背景噪音同时保留人声的自然度。
+```
+ckpts/
+├── a_merge_from_a06_labotf_v2.pt      # SMRU 模型文件 (推荐)
+├── denoise_derev_48k_SFI_E128.yaml    # 对应的 SMRU 配置文件
+├── 2task_48k_lessmusic__addrir_5merged.pt # 另一个 SMRU 模型文件
+└── denoise_derev_48k_SFI.yaml         # 对应的 SMRU 配置文件
+```
+
+#### UVR
+这是传统的人声/背景声分离模型。
+```
+ckpts/
+└── UVR-MDX-NET-Inst_HQ_3.onnx         # UVR 模型文件
 ```
 
 ## 配置文件
 
 修改 `config.json` 以适应您的需求：
 
+- `separate.provider`：选择分离/降噪模型。`"smru"` (推荐) 或 `"uvr"`。
+- `separate.smru.batch_size`: (当使用smru时) 用于推理的批次大小，可根据显存调整以优化速度。
 - `asr_provider`：选择 ASR 引擎（"whisper"、"funasr"、"paraformer"）
 - `language.supported`：支持的语言列表
 - `mos_filter.strategy`：质量过滤策略（"average" 或 "fixed"）

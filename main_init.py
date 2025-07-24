@@ -15,7 +15,7 @@ import pandas as pd
 import soundfile as sf
 import torch
 import tqdm
-from models import (dnsmos, funasr_asr, separate_fast, silero_vad)
+from models import (dnsmos, funasr_asr, separate_fast, vad)
 from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models.eres2net.features import FBank
 from pyannote.audio import Pipeline
@@ -119,7 +119,7 @@ class EmiliaPipeline:
 
         # VAD
         self.logger.debug(" * Loading VAD Model")
-        self.vad = silero_vad.SileroVAD(device=self.device)
+        self.vad = vad.SileroVAD(device=self.device)
 
         # Background Noise Separation
         self.logger.debug(" * Loading Background Noise Model")

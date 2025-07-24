@@ -15,8 +15,8 @@ import soundfile as sf
 import torch
 import torch.multiprocessing as mp
 import tqdm
-from models import (dnsmos, funasr_asr, separate_fast, silero_vad,
-                    )
+from models import (dnsmos, funasr_asr, separate_fast, vad,
+                    smru_separate)
 from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models.eres2net.features import FBank
 from pyannote.audio import Pipeline
@@ -43,7 +43,7 @@ dia_pipeline = None
 asr_model = None
 whisper_asr_model = None
 funasr_asr_model = None
-vad = None
+vad_model = None
 separate_predictor1 = None
 dnsmos_compute_score = None
 refinement_model = None
@@ -75,7 +75,7 @@ def init_worker(config, cli_args):
     - Loads all models into global variables for this process.
     """
     global logger, cfg, g_args, device, batch_size, supported_languages, multilingual_flag
-    global dia_pipeline, asr_model, whisper_asr_model, funasr_asr_model, vad
+    global dia_pipeline, asr_model, whisper_asr_model, funasr_asr_model, vad_model
     global separate_predictor1, dnsmos_compute_score, refinement_model, refinement_feature_extractor
 
     from multiprocessing.process import current_process
@@ -172,11 +172,19 @@ def init_worker(config, cli_args):
 
     # VAD
     logger.debug(" * Loading VAD Model")
-    vad = silero_vad.SileroVAD(device=device)
+    vad_model = vad.SileroVAD(device=device)
 
     # Background Noise Separation
     logger.debug(" * Loading Background Noise Model")
-    separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["step1"], device=device_name)
+    separation_provider = cfg["separate"].get("provider", "uvr") # default to uvr
+    
+    if separation_provider == "smru":
+        logger.info("Using SMRU for source separation.")
+        separate_predictor1 = smru_separate.Predictor(args=cfg["separate"]["smru"], device=device_name)
+    else: # Default to uvr
+        logger.info("Using UVR for source separation.")
+        separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["uvr"], device=device_name)
+
 
     # DNSMOS Scoring
     logger.debug(" * Loading DNSMOS Model")
@@ -351,7 +359,15 @@ def source_separation(predictor, audio):
         rate = audio["sample_rate"]
         mix = librosa.resample(audio["waveform"], orig_sr=rate, target_sr=44100)
 
-    vocals, no_vocals = predictor.predict(mix)
+    # The new smru model expects a different input format and provides a different output format.
+    # We will check the type of the predictor to handle this.
+    if isinstance(predictor, smru_separate.Predictor):
+        # SMRU model handles resampling internally and returns a different tuple.
+        vocals, no_vocals = predictor.predict(mix)
+    else:
+        # Original UVR model
+        vocals, no_vocals = predictor.predict(mix)
+
 
     # convert vocals back to previous sample rate
     logger.debug(f"vocals shape before resample: {vocals.shape}")
@@ -428,9 +444,9 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
     """
     MERGE_GAP = 2  # merge gap in seconds, if smaller than this, merge
     MIN_SEGMENT_LENGTH = 3  # min segment length in seconds
-    MAX_SEGMENT_LENGTH = 20  # max segment length in seconds
+    MAX_SEGMENT_LENGTH = 22  # max segment length in seconds
     GRACE_PERIOD_START_S = 0.00
-    GRACE_PERIOD_END_S = 0.03
+    GRACE_PERIOD_END_S = 0.02
     updated_list = []
 
     # --- Internal Statistics ---
@@ -916,8 +932,8 @@ def main_process(audio_path, podcast_name, episode_name, save_path=None, report_
     # If save_path is not provided, create a default one next to the audio file.
     # Otherwise, use the provided path.
     if not save_path:
-        save_path = os.path.join(os.path.dirname(audio_path) + "_processed", episode_name)
-
+        save_path = os.path.join(os.path.dirname(audio_path), os.path.splitext(os.path.basename(audio_path))[0] + "_processed")
+        
     os.makedirs(save_path, exist_ok=True)
     logger.debug(
         f"Processing audio: {episode_name}, from {audio_path}, save to: {save_path}"
@@ -929,7 +945,11 @@ def main_process(audio_path, podcast_name, episode_name, save_path=None, report_
     audio = standardization(audio_path)
 
     logger.info("Step 1: Source Separation")
-    audio = source_separation(separate_predictor1, audio)
+    # Add a check in config to decide whether to run this step
+    if cfg["separate"].get("enable", True):
+        audio = source_separation(separate_predictor1, audio)
+    else:
+        logger.info("Skipping source separation as per config.")
 
     logger.info("Step 2: Speaker Diarization")
     diarize_df, speaker_centroids = speaker_diarization(
@@ -948,7 +968,7 @@ def main_process(audio_path, podcast_name, episode_name, save_path=None, report_
     )
 
     logger.info("Step 3: Fine-grained Segmentation by VAD")
-    vad_list_initial = vad.vad(diarize_df, audio)
+    vad_list_initial = vad_model.vad(diarize_df, audio)
     processing_stats['initial']['count'] = len(vad_list_initial)
     processing_stats['initial']['duration'] = sum(s["end"] - s["start"] for s in vad_list_initial)
     
@@ -1122,6 +1142,12 @@ if __name__ == "__main__":
         help="The root folder where all processed data will be saved."
     )
     parser.add_argument(
+        "--separation_provider",
+        type=str,
+        default=None,
+        help="Override the separation provider from config (e.g., 'smru' or 'uvr')."
+    )
+    parser.add_argument(
         "--report_path",
         type=str,
         default="processing_report.csv",
@@ -1166,6 +1192,12 @@ if __name__ == "__main__":
     # --- Main Process Setup ---
     main_logger = Logger.get_logger("main")
     main_cfg = load_cfg(args.config_path)
+
+    # --- Override config with CLI arguments ---
+    if args.separation_provider:
+        main_cfg["separate"]["provider"] = args.separation_provider
+        main_logger.info(f"Overriding separation provider with: {args.separation_provider}")
+
 
     # --- Determine Input Source ---
     manifest_entries = []
