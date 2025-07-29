@@ -80,7 +80,10 @@ def init_worker(config, cli_args):
 
     from multiprocessing.process import current_process
     worker_id_str = current_process().name
-    worker_id = int(worker_id_str.split('-')[-1]) - 1
+    if worker_id_str == "MainProcess":
+        worker_id = 0
+    else:
+        worker_id = int(worker_id_str.split('-')[-1]) - 1
 
     # 1. Setup globals
     g_args = cli_args
@@ -112,7 +115,7 @@ def init_worker(config, cli_args):
         device_name = f"cuda:{gpu_id}"
         device = torch.device(device_name)
     else:
-        logger.info(f"Worker {worker_id} using CPU")
+        logger.info(f"Worker {worker_id} using CPU, threads: {g_args.threads}")
         device_name = "cpu"
         device = torch.device(device_name)
         # whisperX expects compute type: int8 on CPU
@@ -211,6 +214,7 @@ def init_worker(config, cli_args):
     supported_languages = cfg["language"]["supported"]
     multilingual_flag = cfg["language"]["multilingual"]
     
+    torch.set_num_threads(g_args.threads)
     logger.debug(f"Worker {worker_id} finished loading models.")
 
 
@@ -1172,13 +1176,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threads",
         type=int,
-        default=4,
+        default=2,
         help="The number of CPU threads to use per worker, e.g. will be multiplied by num workers.",
     )
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=2,
+        default=1,
         help="Number of worker processes to use.",
     )
     parser.add_argument(
@@ -1187,8 +1191,14 @@ if __name__ == "__main__":
         default=False,
         help="Exit pipeline when task done.",
     )
+    # 打docker的时候用来下载模型
+    parser.add_argument(
+        "--prepare_env",
+        type=bool,
+        default=False
+    )
     args = parser.parse_args()
-    
+
     # --- Main Process Setup ---
     main_logger = Logger.get_logger("main")
     main_cfg = load_cfg(args.config_path)
@@ -1198,6 +1208,9 @@ if __name__ == "__main__":
         main_cfg["separate"]["provider"] = args.separation_provider
         main_logger.info(f"Overriding separation provider with: {args.separation_provider}")
 
+    if args.prepare_env:
+        init_worker(main_cfg, args)
+        sys.exit(0)
 
     # --- Determine Input Source ---
     manifest_entries = []

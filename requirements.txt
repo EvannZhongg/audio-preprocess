@@ -33,3 +33,5 @@ openpyxl
 tqdm
 pyyaml
 filelock
+
+silero-vad

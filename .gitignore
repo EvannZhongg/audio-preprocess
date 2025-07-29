@@ -1,0 +1,6 @@
+__pycache__/
+examples/
+processed_data/
+logs/
+iic/
+processing_report.csv

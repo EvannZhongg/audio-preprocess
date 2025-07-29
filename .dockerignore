@@ -1,0 +1,5 @@
+__pycache__/
+*.log
+audio/
+.__trpc.lock
+ft_local/
