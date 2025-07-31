@@ -35,3 +35,5 @@ pyyaml
 filelock
 
 silero-vad
+mutagen
+ray==2.48.0

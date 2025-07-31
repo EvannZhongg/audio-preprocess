@@ -4,3 +4,5 @@ processed_data/
 logs/
 iic/
 processing_report.csv
+ft_local/
+podcast-processed-data/

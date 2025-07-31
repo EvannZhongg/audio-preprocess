@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import time
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 import librosa
@@ -66,6 +67,17 @@ def write_mp3(path, sr, x):
     except Exception as e:
         print(e)
         print("Error: Failed to write MP3 file.")
+
+
+def get_short_hash(text, length=6):
+    """
+    Generates a short, deterministic hash from a string to create a unique file-specific prefix.
+    """
+    if isinstance(text, str):
+        text = text.encode('utf-8')
+    
+    hasher = hashlib.sha1(text)
+    return hasher.hexdigest()[:length]
 
 
 def get_audio_files(folder_path):
