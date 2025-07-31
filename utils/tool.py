@@ -261,6 +261,13 @@ def export_to_libritts(audio, asr_result, folder_path, file_name):
         # 1. Save the audio segment as WAV
         start, end = int(segment["start"] * sr), int(segment["end"] * sr)
         split_audio = waveform[start:end]
+
+        # Peak normalize and convert to 16-bit PCM, same as in MP3 export
+        max_abs_val = np.max(np.abs(split_audio))
+        if max_abs_val > 0:
+            split_audio = (split_audio / max_abs_val) * 32767
+        split_audio = split_audio.astype(np.int16)
+
         wav_path = os.path.join(speaker_folder, f"{base_filename}.wav")
         write_wav(wav_path, sr, split_audio)
 
