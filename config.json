@@ -60,7 +60,7 @@
             "n_fft": 7680
         },
         "smru": {
-            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "conf": "ckpts/denoise_derev_48k_SFI.yaml",
             "chunk_size": 12,
             "valid_size": 8,
             "overlap": 1,
