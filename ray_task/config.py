@@ -1,5 +1,6 @@
-PODCAST_PATH = "examples"
-OUTPUT_PATH = "podcast-processed-data"
+PODCAST_PATH = "/cfs-du3y2r4h/binaryzhang/example"
+OUTPUT_PATH = "/cfs-du3y2r4h/binaryzhang/podcast-processed-data"
+
 # PODCAST_PATH = "/cfs-du3y2r4h/podcast-data/download"
 # OUTPUT_PATH = "/cfs-du3y2r4h/binaryzhang/podcast-processed-data"
 

@@ -3,3 +3,5 @@ __pycache__/
 audio/
 .__trpc.lock
 ft_local/
+podcast-processed-data/
+example/

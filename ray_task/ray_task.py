@@ -88,7 +88,7 @@ def run():
                 continue
 
             # handle ray task
-            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4)
+            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4) + 1
             if len(result_refs) < MAX_NUM_PENDING_TASKS:
                 logger.debug(f"append task={task} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
 
