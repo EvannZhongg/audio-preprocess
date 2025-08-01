@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+from tqdm import tqdm
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.wave import WAVE
@@ -31,7 +32,8 @@ def analyze_podcasts(base_path):
     podcast_data = []
     podcast_total_seconds = 0
 
-    for podcast_name in os.listdir(base_path):
+    podcast_names = os.listdir(base_path)
+    for podcast_name in tqdm(podcast_names, desc="Processing Podcasts"):
         podcast_path = os.path.join(base_path, podcast_name)
         if not os.path.isdir(podcast_path):
             continue

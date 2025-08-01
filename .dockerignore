@@ -4,4 +4,7 @@ audio/
 .__trpc.lock
 ft_local/
 podcast-processed-data/
-example/
+examples/
+logs/
+processed_data/
+iic/

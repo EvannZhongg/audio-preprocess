@@ -4,6 +4,11 @@
 # ray start --address=11.177.169.159:6379
 # nohup python run_ray_task.py > /dev/null 2>&1 &
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd $PROJECT_ROOT
+pwd
+
 # 定义头节点的IP地址
 HEAD_NODE_IP="11.177.169.159"
 
