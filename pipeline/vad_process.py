@@ -2,8 +2,9 @@ import torch
 import librosa
 
 from utils.logger import time_logger
-from pipeline.global_var import logger
+from pipeline.global_var import PipelineParam
 
+logger = PipelineParam.logger
 
 @time_logger
 def refine_vad_list_by_embedding(

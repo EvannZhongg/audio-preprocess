@@ -3,7 +3,12 @@ import numpy as np
 from pydub import AudioSegment
 
 from utils.logger import time_logger
-from pipeline.global_var import logger, cfg
+from pipeline.global_var import PipelineParam
+
+logger = PipelineParam.logger
+
+audio_count = 0
+
 
 @time_logger
 def standardization(audio):
@@ -25,6 +30,9 @@ def standardization(audio):
         ValueError: If the audio parameter is neither a str nor an AudioSegment.
     """
     global audio_count
+
+    cfg = PipelineParam.cfg
+
     name = "audio"
 
     if isinstance(audio, str):

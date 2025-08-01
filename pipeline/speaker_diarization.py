@@ -2,7 +2,10 @@ import torch
 import pandas as pd
 
 from utils.logger import time_logger
-from pipeline.global_var import logger
+from pipeline.global_var import PipelineParam
+
+logger = PipelineParam.logger
+
 
 # Step 2: Speaker Diarization
 @time_logger

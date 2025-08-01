@@ -1,6 +1,5 @@
 import os
 import json
-import hashlib
 
 from utils.tool import export_to_libritts, export_to_mp3, get_short_hash
 from pipeline.pipeline_report import append_to_report, update_stats, print_processing_summary
@@ -10,10 +9,10 @@ from pipeline.speaker_diarization import speaker_diarization
 from pipeline.asr_process import asr
 from pipeline.vad_process import refine_vad_list_by_embedding, cut_by_speaker_label
 from pipeline.mos_prediction import mos_prediction, filter_by_mos
-from pipeline.global_var import (logger, cfg, separate_predictor1,
-                                 dia_pipeline, vad_model, refinement_model,
-                                 device, refinement_feature_extractor)
+from pipeline.global_var import PipelineParam
 
+
+logger = PipelineParam.logger
 
 def file_is_large(audio_path):
     try:
@@ -36,6 +35,14 @@ def main_process(manifest_entry, output_folder, report_path):
     """
     Process the audio file. The save_path is now the root for this specific episode.
     """
+    cfg = PipelineParam.cfg
+    device = PipelineParam.device
+    separate_predictor1 = PipelineParam.separate_predictor1
+    dia_pipeline = PipelineParam.dia_pipeline
+    vad_model = PipelineParam.vad_model
+    refinement_model = PipelineParam.refinement_model
+    refinement_feature_extractor = PipelineParam.refinement_feature_extractor
+
     processing_stats = {
         'initial': {'count': 0, 'duration': 0.0},
         'steps': {

@@ -43,7 +43,7 @@ def load_tasks(file_path):
             processing_dir = f"{OUTPUT_PATH}/{podcast_name}/{episode_name}"
             if os.path.exists(processing_dir):
                 logger.debug(f"please rm -rf {processing_dir}")
-                #shutil.rmtree(processing_dir)
+                shutil.rmtree(processing_dir)
         tasks["processing"] = {}
 
     return tasks

@@ -5,6 +5,8 @@ import traceback
 import os
 import time
 
+from utils import msg_bot
+
 from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
@@ -55,10 +57,16 @@ def handle_task_ray(task, audio_prefix_path, output_path):
     return handle_task(task, audio_prefix_path, output_path)
 
 
+last_send_bot_msg = 0
+
 def print_progress(tasks):
     total_hour = tasks["total_hour"]
     handled_hour = tasks["complete_total_hour"]
-    logger.debug(f"task_stat handled_hour/total_hour={handled_hour}/{total_hour}")
+    log_str = f"audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
+    logger.debug(log_str)
+    if time.time() - last_send_bot_msg > 3600:
+        last_send_bot_msg = time.time()
+        msg_bot.send_msg(log_str)
 
 
 def check_dirty_data(task):
@@ -134,6 +142,7 @@ def run():
                 if cur_task_key == delete_task_key:
                     logger.debug(f"delete todo task {delete_task_key}")
                     del tasks['todo'][i]
+                    break
                 else:
                     i += 1
         save_tasks(TASK_RESULT_FILE, tasks)

@@ -8,31 +8,37 @@ from models.eres2net.features import FBank
 from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models import dnsmos, funasr_asr, separate_fast, vad, smru_separate
 
-# --- Globals for Multiprocessing ---
-audio_count = 0
+class PipelineParam:
+    g_args = None
+    batch_size = 8
+    device = None
 
-cfg = None
-logger = None
+    cfg = None
+    logger = None
 
-# Models
-dia_pipeline = None
-asr_model = None
-whisper_asr_model = None
-funasr_asr_model = None
-vad_model = None
-separate_predictor1 = None
-dnsmos_compute_score = None
-refinement_model = None
-refinement_feature_extractor = None
+    # speaker-diarization
+    dia_pipeline = None
 
-# ASR options
-supported_languages = None
-multilingual_flag = None
+    # asr
+    asr_model = None
+    whisper_asr_model = None
+    funasr_asr_model = None
 
-# Args
-batch_size = 8
-device = None
-g_args = None
+    supported_languages = None
+    multilingual_flag = None
+
+    # vad
+    vad_model = None
+
+    # smru
+    separate_predictor1 = None
+
+    # mos
+    dnsmos_compute_score = None
+
+    # refinement
+    refinement_model = None
+    refinement_feature_extractor = None
 
 
 def init_pipeline_global(config, cli_args):
@@ -41,10 +47,6 @@ def init_pipeline_global(config, cli_args):
     - Sets up logger and device (GPU).
     - Loads all models into global variables for this process.
     """
-    global logger, cfg, g_args, device, batch_size, supported_languages, multilingual_flag
-    global dia_pipeline, asr_model, whisper_asr_model, funasr_asr_model, vad_model
-    global separate_predictor1, dnsmos_compute_score, refinement_model, refinement_feature_extractor
-
     from multiprocessing.process import current_process
     worker_id_str = current_process().name
     if worker_id_str == "MainProcess":
@@ -57,6 +59,11 @@ def init_pipeline_global(config, cli_args):
     cfg = config
     batch_size = g_args.batch_size
     logger = Logger.get_logger(f"worker_{worker_id}")
+
+    PipelineParam.g_args = g_args
+    PipelineParam.cfg = cfg
+    PipelineParam.batch_size = batch_size
+    PipelineParam.logger = logger
 
     # 2. Setup device
     if detect_gpu() and torch.cuda.is_available():
@@ -87,6 +94,8 @@ def init_pipeline_global(config, cli_args):
         device = torch.device(device_name)
         # whisperX expects compute type: int8 on CPU
         logger.info(f"Worker {worker_id} overriding compute type to int8 for CPU.")
+
+    PipelineParam.device = device
     
     logger.debug(f"Worker {worker_id} loading models...")
 
@@ -100,6 +109,7 @@ def init_pipeline_global(config, cli_args):
         use_auth_token=cfg["huggingface_token"],
     )
     dia_pipeline.to(device)
+    PipelineParam.dia_pipeline = dia_pipeline
 
     # ASR Model Loading
     logger.debug(" * Loading ASR Model(s)")
@@ -113,6 +123,8 @@ def init_pipeline_global(config, cli_args):
         funasr_asr_model = funasr_asr.load_asr_model(
             model_dir=funasr_cfg.get("model_dir", "iic/SenseVoiceSmall"), device=device_name
         )
+        PipelineParam.whisper_asr_model = whisper_asr_model
+        PipelineParam.funasr_asr_model = funasr_asr_model
     else:
         if asr_provider == "gemini":
             if "gemini" not in cfg:
@@ -139,10 +151,12 @@ def init_pipeline_global(config, cli_args):
                 g_args.whisper_arch, device_name, compute_type=g_args.compute_type, threads=g_args.threads,
                 asr_options={"initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."}
             )
+        PipelineParam.asr_model = asr_model
 
     # VAD
     logger.debug(" * Loading VAD Model")
     vad_model = vad.SileroVAD(device=device)
+    PipelineParam.vad_model = vad_model
 
     # Background Noise Separation
     logger.debug(" * Loading Background Noise Model")
@@ -154,12 +168,13 @@ def init_pipeline_global(config, cli_args):
     else: # Default to uvr
         logger.info("Using UVR for source separation.")
         separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["uvr"], device=device_name)
-
+    PipelineParam.separate_predictor1 = separate_predictor1
 
     # DNSMOS Scoring
     logger.debug(" * Loading DNSMOS Model")
     primary_model_path = cfg["mos_model"]["primary_model_path"]
     dnsmos_compute_score = dnsmos.ComputeScore(primary_model_path, device_name)
+    PipelineParam.dnsmos_compute_score = dnsmos_compute_score
 
     # Refinement Model
     refinement_cfg = cfg.get("embedding_refinement", {})
@@ -173,6 +188,9 @@ def init_pipeline_global(config, cli_args):
             refinement_model.to(device)
             refinement_model.eval()
             refinement_feature_extractor = FBank()
+
+            PipelineParam.refinement_model = refinement_model 
+            PipelineParam.refinement_feature_extractor = refinement_feature_extractor
         else:
             logger.warning("ERes2Net model path not found or specified, skipping refinement.")
             refinement_model = None
@@ -180,6 +198,8 @@ def init_pipeline_global(config, cli_args):
     # Language flags
     supported_languages = cfg["language"]["supported"]
     multilingual_flag = cfg["language"]["multilingual"]
+    PipelineParam.supported_languages = supported_languages
+    PipelineParam.multilingual_flag = multilingual_flag
     
     torch.set_num_threads(g_args.threads)
     logger.debug(f"Worker {worker_id} finished loading models.")

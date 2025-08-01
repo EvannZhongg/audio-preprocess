@@ -1,9 +1,7 @@
 import librosa
 
 from utils.logger import time_logger
-from pipeline.global_var import (logger, cfg, asr_model, multilingual_flag,
-                                 supported_languages, whisper_asr_model, batch_size,
-                                 funasr_asr_model)
+from pipeline.global_var import PipelineParam
 
 
 @time_logger
@@ -18,6 +16,15 @@ def asr(vad_segments, audio):
     Returns:
         list: A list of ASR results with transcriptions and language details.
     """
+    logger = PipelineParam.logger
+    cfg = PipelineParam.cfg
+    asr_model = PipelineParam.asr_model
+    multilingual_flag = PipelineParam.multilingual_flag
+    supported_languages = PipelineParam.supported_languages
+    whisper_asr_model = PipelineParam.whisper_asr_model
+    batch_size = PipelineParam.batch_size
+    funasr_asr_model = PipelineParam.funasr_asr_model
+
     if len(vad_segments) == 0:
         return []
 

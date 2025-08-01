@@ -156,7 +156,8 @@ input_folder_processed/
 - AAC (`.aac`)
 - MP4 (`.mp4`)
 
-## 路线图 🚀
+## ray分布式处理 🚀
+- 使用scripts/start_ray.sh可以启动头节点和worker节点
+- run_ray_task.py在头节点运行，输入和输出路径在ray_task/config.py
+- 方案设计：https://iwiki.woa.com/p/4015720564
 
-- **Web 界面**：基于 `main_init.py` 的网页版体验界面，支持文件上传和实时进度显示。
-- **[已完成]** ~~多 GPU 支持：基于 `main_multi.py` 的多卡并行处理，大幅提升处理速度。~~

@@ -2,7 +2,10 @@ import librosa
 
 from utils.logger import time_logger
 from models import smru_separate
-from pipeline.global_var import logger
+from pipeline.global_var import PipelineParam
+
+logger = PipelineParam.logger
+
 
 @time_logger
 def source_separation(predictor, audio):

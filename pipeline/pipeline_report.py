@@ -1,7 +1,9 @@
 import os
 import csv
 
-from pipeline.global_var import logger
+from pipeline.global_var import PipelineParam
+
+logger = PipelineParam.logger
 
 
 def append_to_report(report_path, podcast_name, episode_name, file_path, initial_duration, final_duration):

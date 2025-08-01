@@ -2,9 +2,11 @@ import librosa
 import tqdm
 import numpy as np
 
-from pipeline.global_var import cfg, logger, dnsmos_compute_score
+from pipeline.global_var import PipelineParam
 from utils.tool import calculate_audio_stats
 from utils.logger import time_logger
+
+logger = PipelineParam.logger
 
 @time_logger
 def mos_prediction(audio, vad_list):
@@ -18,6 +20,9 @@ def mos_prediction(audio, vad_list):
     Returns:
         tuple: A tuple containing the average MOS and the updated VAD segments with MOS scores.
     """
+    cfg = PipelineParam.cfg
+    dnsmos_compute_score = PipelineParam.dnsmos_compute_score
+
     audio = audio["waveform"]
     sample_rate = 16000
 
