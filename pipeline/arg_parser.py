@@ -80,3 +80,6 @@ def get_cmd_args():
     )
     args = parser.parse_args()
     return args
+
+if __name__ == "__main__":
+    print(get_cmd_args())

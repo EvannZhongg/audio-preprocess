@@ -13,7 +13,9 @@ def get_audio_duration(file_path):
         """Get the duration of an audio file in seconds."""
         if file_path.endswith('.mp3'):
             audio = MP3(file_path)
-        elif file_path.endswith('.m4a') or file_path.endswith('.mp4'):
+        elif file_path.endswith('.mp4'):
+            audio = MP4(file_path)
+        elif file_path.endswith('.m4a'):
             audio = MP4(file_path)
         elif file_path.endswith('.wav'):
             audio = WAVE(file_path)
@@ -25,8 +27,12 @@ def get_audio_duration(file_path):
             sys.exit(1)
         return int(audio.info.length)
     except Exception as e:
-        print(f"{file_path} exception {str(e)}")
-        return 3600
+        try:
+            audio = MP3(file_path)
+            return int(audio.info.length)
+        except Exception as e:
+            print(f"Error processing {file_path} with pydub: {str(e)}")
+            return 3600
 
 def analyze_podcasts(base_path):
     podcast_data = []

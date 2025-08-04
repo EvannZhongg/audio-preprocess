@@ -47,7 +47,7 @@ def handle_task(task, prefix_path, output_path):
         task_key = get_task_key(task)
         ret = run_audio_preprocess_pipeline(input_audio_path, output_path, task_key)
         # logger.debug(f"handle task={task} ret={ret}")
-        return ret["status"], task
+        return ret, task
     except Exception as e:
         logger.error(f"handle task={task} error {traceback.format_exc()}")
         return "EXCEPTION", task
@@ -57,16 +57,16 @@ def handle_task_ray(task, audio_prefix_path, output_path):
     return handle_task(task, audio_prefix_path, output_path)
 
 
-last_send_bot_msg = 0
+last_send_bot_msg = time.time()
 def print_progress(tasks):
     global last_send_bot_msg
     total_hour = tasks["total_hour"]
     handled_hour = tasks["complete_total_hour"]
     log_str = f"audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
     logger.debug(log_str)
-    if time.time() - last_send_bot_msg > 3600:
+    if time.time() - last_send_bot_msg > 3600 * 2:
         last_send_bot_msg = time.time()
-        # msg_bot.send_msg(log_str)
+        msg_bot.send_msg(log_str)
 
 
 def check_dirty_data(task):
@@ -89,15 +89,15 @@ def run():
         # logger.debug(f"all tasks {tasks}")
 
         for task in tasks['todo']:
-            check_dirty_data(task)
-
             # save processing data
             task_key = get_task_key(task)
             if task_key in tasks["processing"]:
                 continue
 
+            check_dirty_data(task)
+
             # handle ray task
-            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4) + 1
+            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4)
             if len(result_refs) < MAX_NUM_PENDING_TASKS:
                 logger.debug(f"append task={task} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
 

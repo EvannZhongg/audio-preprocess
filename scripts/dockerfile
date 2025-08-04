@@ -1,4 +1,4 @@
-FROM rayproject/ray:nightly-py39-cpu
+FROM rayproject/ray:2.48.0.2c63f6-py39-cpu
 USER root
 
 RUN apt-get update
