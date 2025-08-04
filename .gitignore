@@ -82,3 +82,7 @@ iic/
 processing_report.csv
 
 processed_data/
+
+examples/
+ft_local/
+podcast-processed-data/

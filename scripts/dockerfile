@@ -1,0 +1,22 @@
+FROM rayproject/ray:2.48.0.2c63f6-py39-cpu
+USER root
+
+RUN apt-get update
+RUN apt-get install -y vim net-tools lrzsz sox libsox-dev
+
+RUN conda create -y -n AudioPipeline python=3.9
+RUN conda install -n AudioPipeline ffmpeg -y
+RUN conda install -n AudioPipeline pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
+
+RUN mkdir -p /home/oicq/audio_preprocess
+RUN pwd
+COPY . /home/oicq/audio_preprocess
+WORKDIR  /home/oicq/audio_preprocess
+
+RUN echo "source activate AudioPipeline" >> ~/.bashrc
+RUN conda run -n AudioPipeline pip install -r requirements.txt
+RUN conda run -n AudioPipeline pip install onnxruntime-gpu
+RUN conda run -n AudioPipeline python main.py --prepare_env 1
+
+# ENTRYPOINT ["/bin/bash"]
+ENTRYPOINT ["./scripts/start_ray.sh", "auto"]
