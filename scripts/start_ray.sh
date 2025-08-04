@@ -44,9 +44,11 @@ case $operation in
         # 自动判断启动类型
         if [ "$current_ip" == "$HEAD_NODE_IP" ]; then
             echo "Detected head node IP, starting Ray head node"
+            source activate AudioPipeline
             ray start --head --port=6379 --num-cpus=0
         else
             echo "Detected worker node IP, starting Ray worker node"
+            source activate AudioPipeline
             ray start --address=$HEAD_NODE_IP:6379
         fi
         # 保持容器运行

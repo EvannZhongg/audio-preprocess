@@ -4,13 +4,14 @@ import json
 import traceback
 import os
 import time
+import shutil
 
 from utils import msg_bot
 
 from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
-from ray_task.config import OUTPUT_PATH, PODCAST_PATH, TASK_RESULT_FILE
+from ray_task.config import OUTPUT_PATH, PODCAST_PATH, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 from ray_task.load_task import load_tasks
 
@@ -21,9 +22,11 @@ def get_ray_total_cpu():
     total_cpus = sum(node['Resources'].get('CPU', 0) for node in nodes)
     return total_cpus
 
-def save_tasks(file_path, data):
-    with open(file_path, 'w', encoding='utf-8') as f:
+def save_tasks(file_path, backup_file_path, data):
+    with open(backup_file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+    
+    shutil.move(backup_file_path, file_path)
 
 def get_task_key(task):
     task_key = task["podcast_name"] + "/" + task["episode_name"]
@@ -102,7 +105,7 @@ def run():
                 logger.debug(f"append task={task} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
 
                 tasks["processing"][task_key] = task
-                save_tasks(TASK_RESULT_FILE, tasks)
+                save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
                 result_ref = handle_task_ray.remote(task, PODCAST_PATH, OUTPUT_PATH)
                 result_refs.append(result_ref)
@@ -165,7 +168,7 @@ def run():
                     break
                 else:
                     i += 1
-        save_tasks(TASK_RESULT_FILE, tasks)
+        save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
         time.sleep(1)
 

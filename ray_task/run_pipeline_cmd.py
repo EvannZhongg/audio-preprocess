@@ -25,12 +25,12 @@ class TaskCmdArgs:
     batch_size: int = 8
     compute_type: str = 'float16'
     whisper_arch: str = 'medium'
-    threads: int = 2
+    threads: int = 4
 
 
 def run_audio_preprocess_pipeline(input_audio_path, output_dir, task_key):
     main_cfg = load_cfg("config.json")
-    cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', whisper_arch='medium', threads=2)
+    cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', whisper_arch='medium', threads=4)
     logger.info(f"pipeline config={main_cfg} cli_args={cli_args}")
     global_var.init_pipeline_global(main_cfg, cli_args)
 
