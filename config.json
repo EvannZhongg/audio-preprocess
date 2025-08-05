@@ -15,7 +15,7 @@
         "strategy": "fixed",
         "fixed_threshold": 3.0
     },
-    "output_format": "libritts", 
+    "output_format": "default", 
     "language": {
         "multilingual": true,
         "supported": [

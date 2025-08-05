@@ -294,6 +294,59 @@ def export_to_wav(audio, asr_result, folder_path, file_name):
         write_wav(out_path, sr, split_audio)
 
 
+@time_logger
+def export_to_default(audio, asr_result, folder_path, file_name):
+    """Export segmented audio and metadata to default format (LibriTTS structure with JSON metadata)."""
+    sr = audio["sample_rate"]
+    waveform = audio["waveform"]
+
+    # Keep track of utterance count for each speaker
+    speaker_counts = {}
+
+    for segment in tqdm.tqdm(asr_result, desc="Exporting to default format"):
+        speaker_id = segment.get("speaker", "UNKNOWN_SPEAKER")
+
+        # Create speaker-specific directory if it doesn't exist
+        speaker_folder = os.path.join(folder_path, speaker_id)
+        os.makedirs(speaker_folder, exist_ok=True)
+
+        # Update and get the utterance count for the current speaker
+        count = speaker_counts.get(speaker_id, 0) + 1
+        speaker_counts[speaker_id] = count
+
+        # Define file basenames like SPEAKER_00-001
+        base_filename = f"{speaker_id}-{str(count).zfill(5)}"
+
+        # 1. Save the audio segment as MP3
+        start, end = int(segment["start"] * sr), int(segment["end"] * sr)
+        split_audio = waveform[start:end]
+
+        # Convert to mono and normalize for MP3
+        split_audio = librosa.to_mono(split_audio)
+        
+        mp3_path = os.path.join(speaker_folder, f"{base_filename}.mp3")
+        write_mp3(mp3_path, sr, split_audio)
+
+        # 2. Create JSON metadata with DNSMOS, duration, ASR_SenseVoice, etc.
+        duration = segment["end"] - segment["start"]
+        metadata = {
+            "DNSMOS": segment.get("dnsmos", 0.0),
+            "duration": duration,
+            "ASR_SenseVoice": segment.get("text", ""),
+            "speaker": speaker_id
+        }
+        
+        # Add any additional metadata fields that exist in the segment
+        for key, value in segment.items():
+            if key not in ["start", "end", "text", "speaker", "dnsmos"]:
+                metadata[key] = value
+
+        # 3. Save the metadata to a JSON file
+        json_path = os.path.join(speaker_folder, f"{base_filename}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+
 def get_char_count(text):
     """
     Get the character count of a given text, excluding punctuation and spaces.

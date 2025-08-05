@@ -1,7 +1,7 @@
 import os
 import json
 
-from utils.tool import export_to_libritts, export_to_mp3, get_short_hash
+from utils.tool import export_to_libritts, export_to_mp3, export_to_default, get_short_hash
 from pipeline.pipeline_report import append_to_report, update_stats, print_processing_summary
 from pipeline.standardization import standardization
 from pipeline.source_separation import source_separation
@@ -156,11 +156,11 @@ def main_process(manifest_entry, output_folder, report_path):
     if output_format == "libritts":
         export_to_libritts(audio, filtered_list, save_path, episode_name)
         final_path = save_path
+    elif output_format == "default":
+        export_to_default(audio, filtered_list, save_path, episode_name)
+        final_path = save_path
     else:
-        export_to_mp3(audio, filtered_list, save_path, episode_name)
-        final_path = os.path.join(save_path, episode_name + ".json")
-        with open(final_path, "w", encoding="utf-8") as f:
-            json.dump(filtered_list, f, ensure_ascii=False, indent=2)
+        raise ValueError(f"Unsupported output_format: {output_format}. Supported formats: 'libritts', 'default'")
 
     logger.info(f"All done, Saved to: {final_path}")
     
