@@ -330,9 +330,9 @@ def export_to_default(audio, asr_result, folder_path, file_name):
         # 2. Create JSON metadata with DNSMOS, duration, ASR_SenseVoice, etc.
         duration = segment["end"] - segment["start"]
         metadata = {
-            "DNSMOS": segment.get("dnsmos", 0.0),
+            "dnsmos": segment.get("dnsmos", 0.0),
             "duration": duration,
-            "ASR_SenseVoice": segment.get("text", ""),
+            "asr_sensevoice": segment.get("text", ""),
             "speaker": speaker_id
         }
         
