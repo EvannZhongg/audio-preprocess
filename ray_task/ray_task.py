@@ -67,7 +67,7 @@ def print_progress(tasks):
     handled_hour = tasks["complete_total_hour"]
     log_str = f"audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
     logger.debug(log_str)
-    if time.time() - last_send_bot_msg > 3600 * 2:
+    if time.time() - last_send_bot_msg > 3600 * 6:
         last_send_bot_msg = time.time()
         msg_bot.send_msg(log_str)
 

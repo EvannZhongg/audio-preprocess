@@ -163,8 +163,13 @@ def init_pipeline_global(config, cli_args):
     separation_provider = cfg["separate"].get("provider", "uvr") # default to uvr
     
     if separation_provider == "smru":
-        logger.info("Using SMRU for source separation.")
-        separate_predictor1 = smru_separate.Predictor(args=cfg["separate"]["smru"], device=device_name)
+        smru_cfg = cfg["separate"]["smru"].copy()
+        if os.environ.get("USE_E128_SMRU") == "true":
+            smru_cfg["conf"] = "ckpts/denoise_derev_48k_SFI_E128.yaml"
+            logger.info("Using SMRU E128 model for faster GPU processing.")
+        else:
+            logger.info("Using SMRU standard model.")
+        separate_predictor1 = smru_separate.Predictor(args=smru_cfg, device=device_name)
     else: # Default to uvr
         logger.info("Using UVR for source separation.")
         separate_predictor1 = separate_fast.Predictor(args=cfg["separate"]["uvr"], device=device_name)
