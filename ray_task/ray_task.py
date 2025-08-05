@@ -14,6 +14,7 @@ logger = Logger.get_logger(f"ray-task")
 from ray_task.config import OUTPUT_PATH, PODCAST_PATH, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 from ray_task.load_task import load_tasks
+from ray_task.podcast_sort import sort_podcast_todo_tasks
 
 ray.init(ignore_reinit_error=True)
 
@@ -87,6 +88,8 @@ def run():
     result_refs = []
     result_ref_map = {}
     while tasks['todo']:
+        sort_podcast_todo_tasks(tasks['todo'])
+
         need_delete_task_key = []
 
         # logger.debug(f"all tasks {tasks}")
