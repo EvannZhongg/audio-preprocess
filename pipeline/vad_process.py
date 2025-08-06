@@ -1,8 +1,7 @@
-import torch
 import librosa
-
-from utils.logger import time_logger
+import torch
 from pipeline.global_var import PipelineParam
+from utils.logger import time_logger
 
 logger = PipelineParam.logger
 
@@ -21,9 +20,9 @@ def refine_vad_list_by_embedding(
     Returns:
         list: 经过筛选后，逻辑与旧版本一致的VAD切片新列表。
     """
+    import numpy as np
     from sklearn.metrics.pairwise import cosine_similarity
     from torch.nn.utils.rnn import pad_sequence
-    import numpy as np
 
     refined_vad_list = []
     MIN_SEGMENT_DURATION_S = 1.0
@@ -75,7 +74,10 @@ def refine_vad_list_by_embedding(
     for segment in vad_list:
         duration = segment["end"] - segment["start"]
         if duration < MIN_SEGMENT_DURATION_S:
-            refined_vad_list.append(segment)
+            # 对于太短的 segment，设置默认相似度值
+            segment_with_similarity = segment.copy()
+            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            refined_vad_list.append(segment_with_similarity)
             continue
 
         start_frame_main = int(segment["start"] * audio["sample_rate"])
@@ -85,8 +87,10 @@ def refine_vad_list_by_embedding(
         # 1. 单独计算参考嵌入，确保逻辑与旧版一致
         reference_embedding = _get_embedding_single(segment_waveform)
         if reference_embedding is None:
-            # 如果整个片段无法获取embedding，则直接保留
-            refined_vad_list.append(segment)
+            # 如果整个片段无法获取embedding，则直接保留，设置默认相似度
+            segment_with_similarity = segment.copy()
+            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            refined_vad_list.append(segment_with_similarity)
             continue
 
         # 2. 收集所有窗口的波形用于批处理
@@ -103,18 +107,23 @@ def refine_vad_list_by_embedding(
 
             window_start_s += WINDOW_STEP_S
         
-        # 如果没有有效的窗口，则直接保留原片段
+        # 如果没有有效的窗口，则直接保留原片段，设置默认相似度
         if not window_waveforms:
-            refined_vad_list.append(segment)
+            segment_with_similarity = segment.copy()
+            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            refined_vad_list.append(segment_with_similarity)
             continue
 
         # 3. 对所有窗口进行批处理计算
         window_embeddings = _get_embeddings_batched(window_waveforms)
         
-        # 4. 逐一比较
+        # 4. 逐一比较，记录最小相似度
         is_consistent = True
+        min_similarity = float('inf')
+        
         for window_embedding in window_embeddings:
             similarity = cosine_similarity(reference_embedding, window_embedding.reshape(1, -1))[0, 0]
+            min_similarity = min(min_similarity, similarity)
 
             if similarity < SIMILARITY_THRESHOLD:
                 is_consistent = False
@@ -125,7 +134,10 @@ def refine_vad_list_by_embedding(
                 break 
         
         if is_consistent:
-            refined_vad_list.append(segment)
+            # 添加最小相似度到 segment 中
+            segment_with_similarity = segment.copy()
+            segment_with_similarity["min_similarity"] = float(min_similarity)
+            refined_vad_list.append(segment_with_similarity)
 
     return refined_vad_list
 
@@ -148,7 +160,7 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
     """
     MERGE_GAP = 2  # merge gap in seconds, if smaller than this, merge
     MIN_SEGMENT_LENGTH = 3  # min segment length in seconds
-    MAX_SEGMENT_LENGTH = 22  # max segment length in seconds
+    MAX_SEGMENT_LENGTH = 30  # max segment length in seconds
     GRACE_PERIOD_START_S = 0.00
     GRACE_PERIOD_END_S = 0.02
     updated_list = []
@@ -165,6 +177,7 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
         if vad["end"] - vad["start"] >= MAX_SEGMENT_LENGTH:
             duration = vad["end"] - vad["start"]
             logger.warning(
+
                 f"cut_by_speaker_label > Discarding segment for speaker {vad['speaker']} "
                 f"because its duration ({duration:.2f}s) is longer than "
                 f"MAX_SEGMENT_LENGTH ({MAX_SEGMENT_LENGTH}s)."
