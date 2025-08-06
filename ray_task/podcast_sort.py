@@ -17,7 +17,8 @@ def has_file_changed(file_path, last_mtime):
             return True, current_mtime
     except Exception as e:
         logger.error(f"func has_file_changed exception {traceback.format_exc()}")
-        return False, 0
+
+    return False, 0
 
 def move_prefix_to_front(lst: List, prefix: str):
     prefix_elements = [s for s in lst if s.startswith(prefix)]
