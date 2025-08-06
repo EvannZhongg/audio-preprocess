@@ -1,7 +1,6 @@
 import librosa
-
-from utils.logger import time_logger
 from pipeline.global_var import PipelineParam
+from utils.logger import time_logger
 
 
 @time_logger
@@ -115,11 +114,24 @@ def asr(vad_segments, audio):
                 print_progress=False,
             )
             result = transcribe_result_temp["segments"]
+            current_vad_segments = [valid_vad_segments[i] for i in same_language_idx]
+            
             # restore the segment annotation
             for idx, segment in enumerate(result):
                 result[idx]["start"] += start_time
                 result[idx]["end"] += start_time
                 result[idx]["language"] = transcribe_result_temp["language"]
+                
+                # 使用索引直接匹配传递额外字段（如 min_similarity）
+                if idx < len(current_vad_segments):
+                    for key, value in current_vad_segments[idx].items():
+                        if key not in ["start", "end", "text", "speaker", "index"]:
+                            result[idx][key] = value
+                
+                # 确保有默认值
+                if "min_similarity" not in result[idx]:
+                    result[idx]["min_similarity"] = 0.61
+            
             all_transcribe_result.extend(result)
         # sort by start time
         all_transcribe_result = sorted(all_transcribe_result, key=lambda x: x["start"])
@@ -146,8 +158,20 @@ def asr(vad_segments, audio):
             print_progress=False,
         )
         result = transcribe_result["segments"]
+        
         for idx, segment in enumerate(result):
             result[idx]["start"] += start_time
             result[idx]["end"] += start_time
             result[idx]["language"] = transcribe_result["language"]
+            
+            # 使用索引直接匹配传递额外字段（如 min_similarity）
+            if idx < len(vad_segments):
+                for key, value in vad_segments[idx].items():
+                    if key not in ["start", "end", "text", "speaker", "index"]:
+                        result[idx][key] = value
+            
+            # 确保有默认值
+            if "min_similarity" not in result[idx]:
+                result[idx]["min_similarity"] = 0.61
+        
         return result
