@@ -23,6 +23,11 @@ def get_ray_total_cpu():
     total_cpus = sum(node['Resources'].get('CPU', 0) for node in nodes)
     return total_cpus
 
+def get_ray_available_gpu():
+    available_resources = ray.available_resources()
+    available_gpus = available_resources.get('GPU', 0)
+    return available_gpus
+
 def save_tasks(file_path, backup_file_path, data):
     with open(backup_file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
@@ -57,8 +62,20 @@ def handle_task(task, prefix_path, output_path):
         return "EXCEPTION", task
 
 @ray.remote(num_cpus=4, max_retries=0)
-def handle_task_ray(task, audio_prefix_path, output_path):
+def handle_task_ray_cpu(task, audio_prefix_path, output_path):
     return handle_task(task, audio_prefix_path, output_path)
+
+@ray.remote(num_cpus=4, num_gpus=0.5, max_retries=0)
+def handle_task_ray_gpu(task, audio_prefix_path, output_path):
+    return handle_task(task, audio_prefix_path, output_path)
+
+def get_optimal_task_function():
+    """根据可用资源返回最优的任务函数"""
+    available_gpus = get_ray_available_gpu()
+    if available_gpus >= 0.5:
+        return handle_task_ray_gpu
+    else:
+        return handle_task_ray_cpu
 
 
 last_send_bot_msg = time.time()
@@ -110,7 +127,8 @@ def run():
                 tasks["processing"][task_key] = task
                 save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
-                result_ref = handle_task_ray.remote(task, PODCAST_PATH, OUTPUT_PATH)
+                optimal_task_func = get_optimal_task_function()
+                result_ref = optimal_task_func.remote(task, PODCAST_PATH, OUTPUT_PATH)
                 result_refs.append(result_ref)
                 result_ref_map[result_ref] = task
             else:
