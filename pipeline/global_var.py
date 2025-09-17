@@ -136,9 +136,23 @@ def init_pipeline_global(config, cli_args):
         elif asr_provider == "funasr":
             if "funasr" not in cfg:
                 raise ValueError("FunASR configuration not found in config.json")
-            asr_model = funasr_asr.load_asr_model(
-                model_dir=cfg["funasr"].get("model_dir", "iic/SenseVoiceSmall"), device=device_name
-            )
+
+            funasr_model = cfg["funasr"].get("model", "iic/SenseVoiceSmall")
+            funasr_vad_model = cfg["funasr"].get("vad_model", "fsmn-vad")
+            funasr_model_dir_cache = cfg["funasr"].get("model_dir_cache", "iic/SenseVoiceSmall")
+            funasr_vad_model_dir_cache = cfg["funasr"].get("vad_model_dir_cache", "fsmn-vad")
+
+            if funasr_model_dir_cache and os.path.exists(funasr_model_dir_cache):
+                funasr_model_dir = funasr_model_dir_cache
+            else:
+                funasr_model_dir = funasr_model
+
+            if funasr_vad_model_dir_cache and os.path.exists(funasr_vad_model_dir_cache):
+                funasr_vad_model_dir = funasr_vad_model_dir_cache
+            else:
+                funasr_vad_model_dir = funasr_vad_model
+
+            asr_model = funasr_asr.load_asr_model(model_dir=funasr_model_dir, vad_model_dir=funasr_vad_model_dir, device=device_name)
         elif asr_provider == "paraformer":
             if "paraformer" not in cfg:
                 raise ValueError("Paraformer configuration not found in config.json")

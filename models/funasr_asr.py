@@ -18,7 +18,7 @@ class FunASR:
     ASR class using FunASR models.
     """
 
-    def __init__(self, model_dir: str, device: str, **kwargs):
+    def __init__(self, model_dir: str, vad_model_dir: str, device: str, **kwargs):
         logger.info(f"Loading FunASR model from: {model_dir}")
 
         # Use a file lock to prevent race conditions during model download
@@ -33,9 +33,10 @@ class FunASR:
             logger.debug(f"Acquired lock for FunASR model: {model_dir}")
             self.model = AutoModel(
                 model=model_dir,
-                vad_model="fsmn-vad",
+                vad_model=vad_model_dir,
                 vad_kwargs={"max_single_segment_time": 30000},
                 device=device,
+                disable_update=True,
                 **kwargs,
             )
         logger.debug(f"Released lock for FunASR model: {model_dir}")
@@ -130,9 +131,9 @@ class FunASR:
         return {"segments": segments, "language": "unknown"}
 
 
-def load_asr_model(model_dir: str, device: str, **kwargs):
+def load_asr_model(model_dir: str, vad_model_dir: str, device: str, **kwargs):
     """
     Load the FunASR model.
     This function acts as a factory for the FunASR class.
     """
-    return FunASR(model_dir=model_dir, device=device, **kwargs) 
+    return FunASR(model_dir=model_dir, vad_model_dir=vad_model_dir, device=device, **kwargs) 

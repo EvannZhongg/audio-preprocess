@@ -1,7 +1,10 @@
 {
     "asr_provider": "funasr",
     "funasr": {
-        "model_dir": "iic/SenseVoiceSmall"
+        "model": "iic/SenseVoiceSmall",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
     },
     "gemini": {
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
