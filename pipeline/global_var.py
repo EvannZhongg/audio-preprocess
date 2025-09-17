@@ -104,8 +104,15 @@ def init_pipeline_global(config, cli_args):
     logger.debug(" * Loading Speaker Diarization Model (pyannote)")
     if not cfg["huggingface_token"].startswith("hf"):
         raise ValueError("huggingface_token must start with 'hf', check the config file.")
+
+    pyannote_model = cfg["pyannote"].get("model", "pyannote/speaker-diarization-3.1")
+    pyannote_model_dir_cache = cfg["pyannote"].get("model_dir_cache", "/root/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml")
+    if pyannote_model_dir_cache and os.path.exists(pyannote_model_dir_cache):
+        pyannote_model_dir = pyannote_model_dir_cache
+    else:
+        pyannote_model_dir = pyannote_model
     dia_pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
+        pyannote_model_dir,
         use_auth_token=cfg["huggingface_token"],
     )
     dia_pipeline.to(device)
