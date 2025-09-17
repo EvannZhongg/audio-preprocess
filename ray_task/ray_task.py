@@ -65,7 +65,8 @@ def handle_task(task, prefix_path, output_path):
 def handle_task_ray_cpu(task, audio_prefix_path, output_path):
     return handle_task(task, audio_prefix_path, output_path)
 
-@ray.remote(num_cpus=4, num_gpus=0.5, max_retries=0)
+# 目前gpu用的T4，一卡一任务
+@ray.remote(num_cpus=4, num_gpus=1, max_retries=0)
 def handle_task_ray_gpu(task, audio_prefix_path, output_path):
     return handle_task(task, audio_prefix_path, output_path)
 
@@ -115,6 +116,10 @@ def run():
             # save processing data
             task_key = get_task_key(task)
             if task_key in tasks["processing"]:
+                continue
+
+            if task["audio_duration_second"] < 600:
+                need_delete_task_key.append(task_key)
                 continue
 
             check_dirty_data(task)
