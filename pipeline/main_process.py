@@ -1,16 +1,20 @@
-import os
 import json
+import os
+import re
+from pathlib import Path
 
-from utils.tool import export_to_libritts, export_to_mp3, export_to_default, get_short_hash
-from pipeline.pipeline_report import append_to_report, update_stats, print_processing_summary
-from pipeline.standardization import standardization
+from pipeline.asr_process import asr
+from pipeline.global_var import PipelineParam
+from pipeline.mos_prediction import filter_by_mos, mos_prediction
+from pipeline.pipeline_report import (append_to_report,
+                                      print_processing_summary, update_stats)
 from pipeline.source_separation import source_separation
 from pipeline.speaker_diarization import speaker_diarization
-from pipeline.asr_process import asr
-from pipeline.vad_process import refine_vad_list_by_embedding, cut_by_speaker_label
-from pipeline.mos_prediction import mos_prediction, filter_by_mos
-from pipeline.global_var import PipelineParam
-
+from pipeline.standardization import standardization
+from pipeline.vad_process import (cut_by_speaker_label,
+                                  refine_vad_list_by_embedding)
+from utils.meta_info_config import MetaConfig
+from utils.tool import export_to_metadata, get_short_hash
 
 logger = PipelineParam.logger
 
@@ -54,10 +58,12 @@ def main_process(manifest_entry, output_folder, report_path):
         'final': {'count': 0, 'duration': 0.0}
     }
 
-    podcast_name = manifest_entry["PodcastName"]
-    episode_name = manifest_entry["EpisodeName"]
+    meta_info = MetaConfig()
+
+    rel_path = manifest_entry["RelativePath"]
     audio_path = manifest_entry["FilePath"]
-    save_path = os.path.join(output_folder, podcast_name, episode_name)
+    fid = re.sub(r"['\"\s]", "", Path(audio_path).stem)
+    save_path = os.path.join(output_folder, rel_path, fid)
 
     if file_is_large(audio_path):
         return
@@ -65,11 +71,10 @@ def main_process(manifest_entry, output_folder, report_path):
     if not audio_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
         logger.warning(f"Unsupported file type: {audio_path}")
 
-    if not save_path:
-        save_path = os.path.join(os.path.dirname(audio_path), os.path.splitext(os.path.basename(audio_path))[0] + "_processed")
-        
+
     os.makedirs(save_path, exist_ok=True)
-    logger.debug(f"Processing audio: {episode_name}, from {audio_path}, save to: {save_path}")
+    logger.debug(f"Processing audio: {audio_path}, save to: {save_path}")
+    meta_info.update_origin(raw_audio_path=audio_path)
 
     logger.info("Step 0: Preprocess all audio files --> 24k sample rate + wave format + loudnorm + bit depth 16")
     audio = standardization(audio_path)
@@ -91,7 +96,7 @@ def main_process(manifest_entry, output_folder, report_path):
         for old_speaker in diarize_df["speaker"].unique()
     }
     diarize_df["speaker"] = diarize_df["speaker"].map(speaker_mapping)
-    logger.info(f"Renamed speaker labels for '{episode_name}' using hash '{file_hash}'. New format: SPK_{file_hash}_ID")
+    logger.info(f"Renamed speaker labels for '{audio_path}' using hash '{file_hash}'. New format: SPK_{file_hash}_ID")
 
     logger.info("Step 3: Fine-grained Segmentation by VAD")
     vad_list_initial = vad_model.vad(diarize_df, audio)
@@ -116,15 +121,15 @@ def main_process(manifest_entry, output_folder, report_path):
 
     # 检查ASR结果是否为空
     if not asr_result:
-        logger.warning(f"No valid speech segments found in {episode_name} - skipping MOS prediction and filtering")
-        final_path = os.path.join(save_path, episode_name + ".json")
+        logger.warning(f"No valid speech segments found in {audio_path} - skipping MOS prediction and filtering")
+        final_path = os.path.join(save_path, f"{fid}.json")
         # 创建空的结果文件
         with open(final_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         logger.info(f"Empty result saved to: {final_path}")
         processing_stats['final']['count'] = 0
         processing_stats['final']['duration'] = 0.0
-        print_processing_summary(processing_stats, episode_name)
+        print_processing_summary(processing_stats, fid)
         return final_path, []
 
     logger.info("Step 6: Filter")
@@ -139,49 +144,41 @@ def main_process(manifest_entry, output_folder, report_path):
 
     # 检查过滤结果是否为空
     if not filtered_list:
-        logger.warning(f"No segments passed quality filtering for {episode_name}")
-        final_path = os.path.join(save_path, episode_name + ".json")
+        logger.warning(f"No segments passed quality filtering for {audio_path}")
+        final_path = os.path.join(save_path, f"{fid}.json")
         # 仍然创建结果文件，但内容为空
         with open(final_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         logger.info(f"Empty filtered result saved to: {final_path}")
         processing_stats['final']['count'] = 0
         processing_stats['final']['duration'] = 0.0
-        print_processing_summary(processing_stats, episode_name)
+        print_processing_summary(processing_stats, fid)
         return final_path, []
 
     logger.info("Step 7: write result to file")
 
-    output_format = cfg.get("output_format", "default")
-    if output_format == "libritts":
-        export_to_libritts(audio, filtered_list, save_path, episode_name)
-        final_path = save_path
-    elif output_format == "default":
-        export_to_default(audio, filtered_list, save_path, episode_name)
-        final_path = save_path
-    else:
-        raise ValueError(f"Unsupported output_format: {output_format}. Supported formats: 'libritts', 'default'")
+    export_to_metadata(audio, filtered_list, save_path, meta_info, fid)
+    final_path = save_path 
 
     logger.info(f"All done, Saved to: {final_path}")
     
     # Final statistics update and summary print
     processing_stats['final']['count'] = len(filtered_list)
     processing_stats['final']['duration'] = sum(s["end"] - s["start"] for s in filtered_list)
-    print_processing_summary(processing_stats, episode_name)
+    print_processing_summary(processing_stats, fid)
 
     # --- Append to CSV Report ---
     try:
         # append_to_report(
         #     report_path=report_path,
-        #     podcast_name=podcast_name,
-        #     episode_name=episode_name,
+        #     rel_path=rel_path,
         #     file_path=audio_path,
         #     initial_duration=processing_stats['initial']['duration'],
         #     final_duration=processing_stats['final']['duration']
         # )
-        # logger.info(f"Appended results for '{episode_name}' to {os.path.basename(report_path)}")
+        # logger.info(f"Appended results for '{audio_path}'")
         pass
     except Exception as e:
-        logger.error(f"Failed to append to report for {episode_name}: {e}")
+        logger.error(f"Failed to append to report for {audio_path}: {e}")
 
     return final_path, filtered_list

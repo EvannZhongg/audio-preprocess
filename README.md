@@ -61,7 +61,6 @@ ckpts/
 - `asr_provider`：选择 ASR 引擎（"whisper"、"funasr"、"paraformer"）
 - `language.supported`：支持的语言列表
 - `mos_filter.strategy`：质量过滤策略（"average" 或 "fixed"）
-- `output_format`：输出格式（"default" 或 "libritts"）
 - `huggingface_token`：Hugging Face 访问令牌（用于说话人分离模型）
 
 ## 基本使用
@@ -124,27 +123,41 @@ python main_multi.py \
 - `--num_workers_per_gpu`: 指定在**每张** GPU 上启动的工作进程数量（默认：`2`）。
 - `--disabled_gpu_ids`: (可选) 需要禁用的 GPU ID 列表，以逗号分隔（例如, `"0,3"`）。
 
-## 输出格式
+## 输入输出格式
 
-### 默认格式
-
-### LibriTTS 格式
-
-当 `config.json` 中设置 `"output_format": "libritts"` 时：
-
+通常来说，我们需要传入一个包含复合格式要求音频文件的文件夹路径，如：
 ```
-input_folder_processed/
-├── audio1/
-│   ├── SPK_abc123_00/
-│   │   ├── SPK_abc123_00-00001.wav
-│   │   ├── SPK_abc123_00-00001.normalized.txt
-│   │   ├── SPK_abc123_00-00002.wav
-│   │   ├── SPK_abc123_00-00002.normalized.txt
+input_folder_path/
+├── dir1/
+│   ├── sub_dir1/
+│   │   ├── 1-00001.wav
+│   │   ├── 1-00002.wav
 │   │   └── ...
-│   └── SPK_abc123_01/
-│       └── ...
-└── audio2/
-    └── ...
+│   └── sub_dir1/
+│       └── 2-00002.wav
+└── dir2/
+    └── 1-00001.wav
+```
+对于每个解析的合法音频文件, `pipiline`处理完成后会生成一个同名的meta.json已经降噪处理后的音频文件，输出结果保存在`--output_folder`中，目录结构和输入目录结构保持一致，如：
+```
+output_folder/
+├── dir1/
+│   ├── sub_dir1/
+│   │   ├── 1-00001
+│   │   |   ├── 1-00001.wav
+│   │   |   ├── 1-00001.json
+│   │   ├── 1-00002
+│   │   |   ├── 1-00002.wav
+│   │   |   ├── 1-00002.json
+│   │   └── ...
+│   └── sub_dir1/
+│       └── 2-00002
+│   │   |   ├── 2-00002.wav
+│   │   |   ├── 2-00002.json
+└── dir2/
+    └── 1-00001
+    │   │   ├── 1-00001.wav
+│   │   |   ├── 1-00001.json
 ```
 
 ## 支持的音频格式
@@ -160,4 +173,3 @@ input_folder_processed/
 - 使用scripts/start_ray.sh可以启动头节点和worker节点
 - run_ray_task.py在头节点运行，输入和输出路径在ray_task/config.py
 - 方案设计：https://iwiki.woa.com/p/4015720564
-

@@ -1,12 +1,12 @@
-import os
 import csv
+import os
 
 from pipeline.global_var import PipelineParam
 
 logger = PipelineParam.logger
 
 
-def append_to_report(report_path, podcast_name, episode_name, file_path, initial_duration, final_duration):
+def append_to_report(report_path, rel_path, file_path, initial_duration, final_duration):
     """
     Appends a new row to the processing report CSV file.
     Creates the file and writes the header if it doesn't exist.
@@ -19,8 +19,7 @@ def append_to_report(report_path, podcast_name, episode_name, file_path, initial
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow([
-                "PodcastName", 
-                "EpisodeName", 
+                "RelativePath", 
                 "FilePath",
                 "InitialDuration(s)", 
                 "FinalDuration(s)", 
@@ -28,8 +27,7 @@ def append_to_report(report_path, podcast_name, episode_name, file_path, initial
             ])
         
         writer.writerow([
-            podcast_name, 
-            episode_name, 
+            rel_path, 
             file_path,
             f"{initial_duration:.2f}", 
             f"{final_duration:.2f}", 
@@ -88,5 +86,3 @@ def print_processing_summary(stats, audio_name):
         f"Final Duration: {final_duration:.2f}s / {initial_duration:.2f}s ({retention_rate_duration:.2f}%)"
     )
     logger.info("--- End of Summary ---")
-
-

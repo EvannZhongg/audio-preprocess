@@ -1,28 +1,28 @@
-import os
-import sys
 import csv
-import tqdm
+import os
 import pathlib
+import sys
 import warnings
 from functools import partial
-import torch.multiprocessing as mp
 
-from utils.logger import Logger
-from utils.tool import get_audio_files, load_cfg, filter_manifest_by_report
-from pipeline.global_var import init_pipeline_global
+import torch.multiprocessing as mp
+import tqdm
+
 from pipeline.arg_parser import get_cmd_args
+from pipeline.global_var import init_pipeline_global
+from utils.logger import Logger
+from utils.tool import filter_manifest_by_report, get_audio_files, load_cfg
 
 warnings.filterwarnings("ignore")
 
-def get_audio_manifest(audio_path):
-    path_parts = pathlib.Path(audio_path).parts
-    podcast_name = path_parts[-2] if len(path_parts) > 1 else "UnknownPodcast"
-    episode_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+def get_audio_manifest(audio_path, base_dir):   
+    relative_path = os.path.relpath(os.path.dirname(audio_path), base_dir)
     return {
-        "PodcastName": podcast_name,
-        "EpisodeName": episode_name,
+        "RelativePath": relative_path,
         "FilePath": audio_path
     }
+
     
 def main():
     # Use 'spawn' for CUDA safety in multiprocessing
@@ -46,7 +46,7 @@ def main():
     # --- Determine Input Source ---
     manifest_entries = []
     if args.input_audio_path:
-        manifest_entries.append(get_audio_manifest(args.input_audio_path)) 
+        manifest_entries.append(get_audio_manifest(args.input_audio_path, args.input_folder_path)) 
     elif args.manifest_path:
         main_logger.info(f"Reading audio manifest from: {args.manifest_path}")
         try:
@@ -64,7 +64,7 @@ def main():
         
         audio_paths = get_audio_files(args.input_folder_path)
         for audio_path in audio_paths:
-            manifest_entries.append(get_audio_manifest(audio_path))
+            manifest_entries.append(get_audio_manifest(audio_path, args.input_folder_path))
     else:
         main_logger.error("Error: You must provide either --manifest_path or --input_folder_path.")
         sys.exit(1)

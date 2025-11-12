@@ -1,12 +1,15 @@
 import os
+
 import torch
 from pyannote.audio import Pipeline
 
+from models import (dnsmos, funasr_asr, separate_fast, smru_separate, vad,
+                    whisper_asr)
+from models.eres2net.ERes2NetV2 import ERes2NetV2
+from models.eres2net.features import FBank
 from utils.logger import Logger
 from utils.tool import detect_gpu
-from models.eres2net.features import FBank
-from models.eres2net.ERes2NetV2 import ERes2NetV2
-from models import dnsmos, funasr_asr, separate_fast, vad, smru_separate
+
 
 class PipelineParam:
     g_args = None
