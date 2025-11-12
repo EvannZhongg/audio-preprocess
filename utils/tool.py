@@ -390,7 +390,7 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
     save_json_path = os.path.join(folder_path, f"{file_name}.json")
     meta_info.save_to_file(save_json_path)
 
-    
+
 def get_char_count(text):
     """
     Get the character count of a given text, excluding punctuation and spaces.
@@ -401,22 +401,22 @@ def get_char_count(text):
     return char_count
 
 
-def calculate_audio_stats(
-    data, min_duration=3, max_duration=30, min_dnsmos=3, min_char_count=2
-):
-    """
+def calculate_audio_stats(data, metrics_filter_cfg):
+    """"
     Reading the proviced json, calculate and return the audio ID and their duration that meet the given filtering criteria.
 
     Args:
         data: JSON.
-        min_duration: Minimum duration of the audio in seconds.
-        max_duration: Maximum duration of the audio in seconds.
-        min_dnsmos: Minimum DNSMOS value.
-        min_char_count: Minimum number of characters.
-
+        metrics_filter_cfg: Configuration dictionary containing filtering criteria.
     Returns:
         valid_audio_stats: A list containing tuples of audio ID and their duration.
     """
+
+    min_duration = metrics_filter_cfg.get("min_duration", 3)
+    max_duration = metrics_filter_cfg.get("max_duration", 30)
+    min_dnsmos = metrics_filter_cfg.get("fixed_dnsmos_threshold", 3.0)
+    min_char_count = metrics_filter_cfg.get("min_char_count", 2)
+
     all_audio_stats = []
     valid_audio_stats = []
     avg_durations = []

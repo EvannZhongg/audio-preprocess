@@ -3,8 +3,8 @@ import os
 import torch
 from pyannote.audio import Pipeline
 
-from models import (dnsmos, funasr_asr, separate_fast, smru_separate, vad,
-                    whisper_asr)
+from models import (brouhaha_metrics, dnsmos, funasr_asr, separate_fast,
+                    smru_separate, vad, whisper_asr)
 from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models.eres2net.features import FBank
 from utils.logger import Logger
@@ -35,8 +35,9 @@ class PipelineParam:
     # smru
     separate_predictor1 = None
 
-    # mos
+   # metrics
     dnsmos_compute_score = None
+    brouhaha_metric = None
 
     # refinement
     refinement_model = None
@@ -237,6 +238,11 @@ def init_pipeline_global(config, cli_args):
     primary_model_path = cfg["mos_model"]["primary_model_path"]
     dnsmos_compute_score = dnsmos.ComputeScore(primary_model_path, device_name)
     PipelineParam.dnsmos_compute_score = dnsmos_compute_score
+
+    if cfg["metrics"].get("use_brouhaha", False):
+        model_name = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
+        model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "/root/.cache/huggingface/hub/models--pyannote--brouhaha")
+        PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(model_name, cache_dir=model_dir_cache, token=cfg["huggingface_token"], device=device_name)
 
     # Refinement Model
     refinement_cfg = cfg.get("embedding_refinement", {})

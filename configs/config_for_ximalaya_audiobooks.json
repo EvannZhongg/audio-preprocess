@@ -11,7 +11,7 @@
         ]
     },
     "asr_provider": "funasr",
-    "validation_asr_provider": "whisper",
+    "validation_asr_provider": "paraformer",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.15,
@@ -80,9 +80,29 @@
             "batch_size": 4
         }
     },
-    "mos_filter": {
+    "strategy_parameters": {
+        "merge_gap": 0.8,
+        "min_segment_length": 2.0,
+        "max_segment_length": 30.0,
         "strategy": "fixed",
-        "fixed_threshold": 3.0
+        "fixed_dnsmos_threshold": 2.9,
+        "fixed_c50_threshold": 40.0,
+        "fixed_snr_threshold": 30.0,
+        "min_duration":2.0,
+        "max_duration":30.0,
+        "min_char_count": 2.0,
+        "inter_similarity_threshold": 0.69,
+        "intra_similarity_threshold": 0.63
+    },
+    "metrics": {
+        "dnsmos":{
+            "mos_model_path": "ckpts/sig_bak_ovr.onnx"
+        },
+        "use_brouhaha": true,
+        "brouhaha":{
+            "model": "pyannote/brouhaha",
+            "model_dir_cache": "/root/.cache/huggingface/hub/models--pyannote--brouhaha"
+        }
     },
     "mos_model": {
         "primary_model_path": "ckpts/sig_bak_ovr.onnx"

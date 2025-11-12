@@ -1,5 +1,9 @@
 import librosa
+import numpy as np
 import torch
+from sklearn.metrics.pairwise import cosine_similarity
+from torch.nn.utils.rnn import pad_sequence
+
 from pipeline.global_var import PipelineParam
 from utils.logger import time_logger
 
@@ -7,28 +11,26 @@ logger = PipelineParam.logger
 
 @time_logger
 def refine_vad_list_by_embedding(
-    vad_list, audio, refinement_model, feature_extractor, device
+    vad_list, audio, refinement_model, similarity_threshold, feature_extractor, device
 ):
     """
     Args:
         vad_list (list): 从 vad.vad() 得到的原始VAD切片列表。
         audio (dict): 音频数据。
         refinement_model: 用于优化的ERes2NetV2模型。
+        similarity_threshold: 相似度阈值。
         feature_extractor: 模型的FBank特征提取器。
         device: 运行模型的torch设备 (CPU或GPU)。
 
     Returns:
         list: 经过筛选后，逻辑与旧版本一致的VAD切片新列表。
     """
-    import numpy as np
-    from sklearn.metrics.pairwise import cosine_similarity
-    from torch.nn.utils.rnn import pad_sequence
 
     refined_vad_list = []
     MIN_SEGMENT_DURATION_S = 1.0
     WINDOW_SIZE_S = 1.1
     WINDOW_STEP_S = 0.4
-    SIMILARITY_THRESHOLD = 0.6
+    SIMILARITY_THRESHOLD = similarity_threshold
     MAX_REFINEMENT_BATCH_SIZE = 64 
 
     def _get_embedding_single(waveform_segment):
@@ -76,7 +78,8 @@ def refine_vad_list_by_embedding(
         if duration < MIN_SEGMENT_DURATION_S:
             # 对于太短的 segment，设置默认相似度值
             segment_with_similarity = segment.copy()
-            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            segment_with_similarity["min_similarity"] = similarity_threshold
+            segment_with_similarity["reference_embedding"] = None
             refined_vad_list.append(segment_with_similarity)
             continue
 
@@ -89,7 +92,7 @@ def refine_vad_list_by_embedding(
         if reference_embedding is None:
             # 如果整个片段无法获取embedding，则直接保留，设置默认相似度
             segment_with_similarity = segment.copy()
-            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            segment_with_similarity["min_similarity"] = similarity_threshold
             refined_vad_list.append(segment_with_similarity)
             continue
 
@@ -110,7 +113,8 @@ def refine_vad_list_by_embedding(
         # 如果没有有效的窗口，则直接保留原片段，设置默认相似度
         if not window_waveforms:
             segment_with_similarity = segment.copy()
-            segment_with_similarity["min_similarity"] = 0.61  # 默认相似度
+            segment_with_similarity["min_similarity"] = similarity_threshold 
+            segment_with_similarity["reference_embedding"] = None
             refined_vad_list.append(segment_with_similarity)
             continue
 
@@ -137,13 +141,14 @@ def refine_vad_list_by_embedding(
             # 添加最小相似度到 segment 中
             segment_with_similarity = segment.copy()
             segment_with_similarity["min_similarity"] = float(min_similarity)
+            segment_with_similarity["reference_embedding"] = reference_embedding
             refined_vad_list.append(segment_with_similarity)
 
     return refined_vad_list
 
 
 @time_logger
-def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_process_vad"):
+def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_name="post_process_vad"):
     """
     Merge and trim VAD segments by speaker labels, enforcing constraints on segment length and merge gaps.
     Also adds a grace period to the end of segments to reduce cut-offs.
@@ -153,14 +158,16 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
         vad_list (list): List of VAD segments with start, end, and speaker labels.
         audio_duration (float): Total duration of the audio in seconds.
         stats (dict): The main statistics dictionary to be updated.
+        parameters_cfg(dict): The configuration for the VAD post-process.
         step_name (str): The name of the step for statistics tracking.
 
     Returns:
         list: A list of updated VAD segments after merging and trimming.
     """
-    MERGE_GAP = 2  # merge gap in seconds, if smaller than this, merge
-    MIN_SEGMENT_LENGTH = 3  # min segment length in seconds
-    MAX_SEGMENT_LENGTH = 30  # max segment length in seconds
+    MERGE_GAP = postprocess_cfg.get("merge_gap", 2)   # merge gap in seconds, if smaller than this, merge
+    MIN_SEGMENT_LENGTH = postprocess_cfg.get("min_segment_length", 3)  # min segment length in seconds
+    MAX_SEGMENT_LENGTH = postprocess_cfg.get("max_segment_length", 30)  # max segment length in seconds
+    MIN_SIMILARITY = postprocess_cfg.get("intra_similarity_threshold", 0.64) # min similarity between segments
     GRACE_PERIOD_START_S = 0.00
     GRACE_PERIOD_END_S = 0.02
     updated_list = []
@@ -173,6 +180,7 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
         last_start_time = updated_list[-1]["start"] if updated_list else None
         last_end_time = updated_list[-1]["end"] if updated_list else None
         last_speaker = updated_list[-1]["speaker"] if updated_list else None
+        last_embedding = updated_list[-1]["reference_embedding"] if updated_list else None
 
         if vad["end"] - vad["start"] >= MAX_SEGMENT_LENGTH:
             duration = vad["end"] - vad["start"]
@@ -192,6 +200,10 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, step_name="post_proces
             or last_speaker != vad["speaker"]
             or vad["end"] - vad["start"] >= MIN_SEGMENT_LENGTH
         ):
+            updated_list.append(vad)
+            continue
+
+        if last_embedding is None or vad["reference_embedding"] is None or cosine_similarity(last_embedding, vad["reference_embedding"])[0, 0] < MIN_SIMILARITY:
             updated_list.append(vad)
             continue
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pipeline.asr_process import asr
 from pipeline.global_var import PipelineParam
-from pipeline.mos_prediction import filter_by_mos, mos_prediction
+from pipeline.metrics_prediction import filter_by_metrics, metrics_prediction
 from pipeline.pipeline_report import (append_to_report,
                                       print_processing_summary, update_stats)
 from pipeline.source_separation import source_separation
@@ -37,7 +37,7 @@ def file_is_large(audio_path):
 
 def main_process(manifest_entry, output_folder, report_path):
     """
-    Process the audio file. The save_path is now the root for this specific episode.
+    Process the audio file..
     """
     cfg = PipelineParam.cfg
     device = PipelineParam.device
@@ -53,7 +53,7 @@ def main_process(manifest_entry, output_folder, report_path):
             'embedding_refinement': {'discarded_count': 0, 'discarded_duration': 0.0},
             'post_process_vad': {'discarded_count': 0, 'discarded_duration': 0.0},
             'asr': {'discarded_count': 0, 'discarded_duration': 0.0},
-            'mos_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'metrics_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
         },
         'final': {'count': 0, 'duration': 0.0}
     }
@@ -106,14 +106,15 @@ def main_process(manifest_entry, output_folder, report_path):
     # --- New Step 3.5: Refine VAD list by Embedding ---
     if cfg.get("embedding_refinement", {}).get("enable", True) and refinement_model:
         logger.info("Step 3.5: Refining VAD list by speaker embedding for internal consistency.")
-        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, refinement_feature_extractor, device)
+        inter_similarity_threshold = cfg.get("strategy_parameters", {}).get("inter_similarity_threshold", 0.7)
+        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_feature_extractor, device)
         update_stats(processing_stats, 'embedding_refinement', vad_list_initial, vad_list_refined)
     else:
         vad_list_refined = vad_list_initial
 
     logger.info("Step 4: Post-process VAD segments")
     audio_duration = len(audio["waveform"]) / audio["sample_rate"]
-    segment_list = cut_by_speaker_label(vad_list_refined, audio_duration, processing_stats)
+    segment_list = cut_by_speaker_label(vad_list_refined, audio_duration, processing_stats, cfg.get("strategy_parameters", {}))
 
     logger.info("Step 5: ASR")
     asr_result = asr(segment_list, audio)
@@ -133,14 +134,14 @@ def main_process(manifest_entry, output_folder, report_path):
         return final_path, []
 
     logger.info("Step 6: Filter")
-    logger.info("Step 6.1: calculate mos_prediction")
-    avg_mos, mos_list = mos_prediction(audio, asr_result)
+    logger.info("Step 6.1: calculate metrics_prediction")
+    avg_metrics, metrics_list = metrics_prediction(audio, asr_result, cfg.get("strategy_parameters", {}))
 
-    logger.info(f"Step 6.1: done, average MOS: {avg_mos}")
+    logger.info(f"Step 6.1: done, average dnsmos: {avg_metrics[0]}")
 
-    logger.info("Step 6.2: Filter out files with less than average MOS")
-    filtered_list = filter_by_mos(mos_list, cfg.get("mos_filter", {}))
-    update_stats(processing_stats, 'mos_filter', mos_list, filtered_list)
+    logger.info("Step 6.2: Filter out files with less than average metrics")
+    filtered_list = filter_by_metrics(metrics_list, cfg.get("strategy_parameters", {}))
+    update_stats(processing_stats, 'metrics_filter', metrics_list, filtered_list)
 
     # 检查过滤结果是否为空
     if not filtered_list:

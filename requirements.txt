@@ -24,6 +24,8 @@ funasr
 faster-whisper==1.1.0
 whisperx==3.3.0
 jiwe==4.0.0
+# Audio-quality metrics
+https://github.com/marianne-m/brouhaha-vad/archive/main.zip
 
 # Audio Processing & File Handling
 librosa
