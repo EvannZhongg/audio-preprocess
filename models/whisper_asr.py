@@ -3,14 +3,17 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import List, NamedTuple, Optional, Union
+
 import faster_whisper
-from typing import List, Union, Optional, NamedTuple
-import torch
 import numpy as np
+import torch
 import tqdm
-from whisperx.audio import N_SAMPLES, SAMPLE_RATE, load_audio, log_mel_spectrogram
-from whisperx.types import TranscriptionResult, SingleSegment
-from whisperx.asr import WhisperModel, FasterWhisperPipeline, find_numeral_symbol_tokens
+from whisperx.asr import (FasterWhisperPipeline, WhisperModel,
+                          find_numeral_symbol_tokens)
+from whisperx.audio import (N_SAMPLES, SAMPLE_RATE, load_audio,
+                            log_mel_spectrogram)
+from whisperx.types import SingleSegment, TranscriptionResult
 
 
 class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
@@ -191,7 +194,7 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
 
 
 def load_asr_model(
-    whisper_arch: str,
+    model_path: str,
     device: str,
     device_index: int = 0,
     compute_type: str = "float16",
@@ -208,7 +211,7 @@ def load_asr_model(
     Load a Whisper model for inference.
 
     Args:
-        whisper_arch (str): The name of the Whisper model to load.
+        model_path (str): The path to the Whisper model to load.
         device (str): The device to load the model on.
         device_index (int, optional): The device index. Defaults to 0.
         compute_type (str, optional): The compute type to use for the model. Defaults to "float16".
@@ -228,12 +231,17 @@ def load_asr_model(
         ValueError: If the whisper architecture is not recognized.
     """
 
-    if whisper_arch.endswith(".en"):
-        language = "en"
+    if device == 'cpu':
+        assert compute_type == 'float32', 'float16 is not supported on cpu'
+        device_name = device
+        device_index = 0
+    else:
+        device_name = device.split(":")[0]
+        device_index = int(device.split(":")[1])
 
     model = model or WhisperModel(
-        whisper_arch,
-        device=device,
+        model_size_or_path=model_path,
+        device=device_name,
         device_index=device_index,
         compute_type=compute_type,
         download_root=download_root,

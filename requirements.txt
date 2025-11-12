@@ -23,6 +23,7 @@ scikit-learn
 funasr
 faster-whisper==1.1.0
 whisperx==3.3.0
+jiwe==4.0.0
 
 # Audio Processing & File Handling
 librosa

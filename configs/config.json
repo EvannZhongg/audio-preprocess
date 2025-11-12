@@ -13,7 +13,7 @@
     "asr_provider": "funasr",
     "validation_asr_provider": "paraformer",
     "asr_validation": {
-        "enable": false,
+        "enable": true,
         "wer_threshold": 0.15,
         "language": "zh"
     },
