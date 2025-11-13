@@ -1,20 +1,22 @@
-import sys
-import ray
 import json
-import traceback
 import os
-import time
 import shutil
+import sys
+import time
+import traceback
+
+import ray
 
 from utils import msg_bot
-
 from utils.logger import Logger
+
 logger = Logger.get_logger(f"ray-task")
 
-from ray_task.config import OUTPUT_PATH, PODCAST_PATH, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE
-from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
+from ray_task.config import (OUTPUT_PATH, PODCAST_PATH,
+                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.podcast_sort import sort_podcast_todo_tasks
+from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
 ray.init(ignore_reinit_error=True)
 
@@ -35,26 +37,24 @@ def save_tasks(file_path, backup_file_path, data):
     shutil.move(backup_file_path, file_path)
 
 def get_task_key(task):
-    task_key = task["podcast_name"] + "/" + task["episode_name"]
+    task_key = task["relative_path"]
     return task_key
 
 def handle_task(task, prefix_path, output_path):
     """
     task
     {
-        "podcast_name": "xx",
-        "episode_name": "xx",
+        "relative_path": "xx",
         "audio_duration_second": 0 
     }
     """
 
     try:
-        podcast_name = task["podcast_name"]
-        episode_name = task["episode_name"]
-        input_audio_path = f"{prefix_path}/{podcast_name}/{episode_name}"
+        relative_path = task["relative_path"]
+        input_audio_path = f"{prefix_path}/{relative_path}"
 
         task_key = get_task_key(task)
-        ret = run_audio_preprocess_pipeline(input_audio_path, output_path, task_key)
+        ret = run_audio_preprocess_pipeline(input_audio_path, prefix_path, output_path, task_key)
         # logger.debug(f"handle task={task} ret={ret}")
         return ret, task
     except Exception as e:
@@ -92,9 +92,8 @@ def print_progress(tasks):
 
 
 def check_dirty_data(task):
-    podcast_name = task["podcast_name"]
-    episode_name = os.path.splitext(os.path.basename(task["episode_name"]))[0]
-    cur_task_dir = f"{OUTPUT_PATH}/{podcast_name}/{episode_name}"
+    relative_path = task["relative_path"]
+    cur_task_dir = f"{OUTPUT_PATH}/{relative_path}"
     if os.path.exists(cur_task_dir):
         logger.error(f"unexcepted dir {cur_task_dir}")
         sys.exit(1)
@@ -106,7 +105,7 @@ def run():
     result_refs = []
     result_ref_map = {}
     while tasks['todo']:
-        sort_podcast_todo_tasks(tasks['todo'])
+        # sort_podcast_todo_tasks(tasks['todo'])
 
         need_delete_task_key = []
 
@@ -118,7 +117,8 @@ def run():
             if task_key in tasks["processing"]:
                 continue
 
-            if task["audio_duration_second"] < 600:
+            # if task["audio_duration_second"] < 600:
+            if task["audio_duration_second"] < 60:
                 need_delete_task_key.append(task_key)
                 continue
 

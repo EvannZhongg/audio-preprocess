@@ -46,7 +46,7 @@ def main():
     # --- Determine Input Source ---
     manifest_entries = []
     if args.input_audio_path:
-        manifest_entries.append(get_audio_manifest(args.input_audio_path, args.input_folder_path)) 
+        manifest_entries.append(get_audio_manifest(args.input_audio_path, os.path.dirname(args.input_audio_path))) 
     elif args.manifest_path:
         main_logger.info(f"Reading audio manifest from: {args.manifest_path}")
         try:

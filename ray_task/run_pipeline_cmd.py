@@ -10,13 +10,10 @@ from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
 
-def get_audio_manifest(audio_path):
-    path_parts = Path(audio_path).parts
-    podcast_name = path_parts[-2] if len(path_parts) > 1 else "UnknownPodcast"
-    episode_name = os.path.splitext(os.path.basename(audio_path))[0]
+def get_audio_manifest(audio_path, base_dir):   
+    relative_path = os.path.relpath(os.path.dirname(audio_path), base_dir)
     return {
-        "PodcastName": podcast_name,
-        "EpisodeName": episode_name,
+        "RelativePath": relative_path,
         "FilePath": audio_path
     }
 
@@ -28,9 +25,9 @@ class TaskCmdArgs:
     threads: int = 4
 
 
-def run_audio_preprocess_pipeline(input_audio_path, output_dir, task_key):
+def run_audio_preprocess_pipeline(input_audio_path, prefix_path, output_dir, task_key):
     main_cfg = load_cfg("config.json")
-    cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', whisper_arch='medium', threads=4)
+    cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', threads=4)
     logger.info(f"pipeline config={main_cfg} cli_args={cli_args}")
     global_var.init_pipeline_global(main_cfg, cli_args)
 
@@ -38,7 +35,7 @@ def run_audio_preprocess_pipeline(input_audio_path, output_dir, task_key):
     logger.info(f"Processed data will be saved in: {output_dir}")
 
     from pipeline.main_process import main_process
-    manifest_entry = get_audio_manifest(input_audio_path)
+    manifest_entry = get_audio_manifest(input_audio_path, prefix_path)
     main_process(manifest_entry, output_dir, "processing_report.csv")
     
     logger.info("--- All files have been processed. ---")

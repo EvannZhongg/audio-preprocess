@@ -1,10 +1,10 @@
 import json
-import shutil
 import os
+import shutil
 
-from ray_task.config import PODCAST_DATA_FILE, OUTPUT_PATH
-
+from ray_task.config import OUTPUT_PATH, PODCAST_DATA_FILE
 from utils.logger import Logger
+
 logger = Logger.get_logger()
 
 def load_tasks(file_path):
@@ -18,12 +18,10 @@ def load_tasks(file_path):
             podcast_data = json.load(f)
             tasks['todo'] = [
                 {
-                    "podcast_name": podcast['podcast_name'],
-                    "episode_name": episode['episode_name'],
-                    "audio_duration_second": episode['audio_duration_second']
+                    "relative_path": podcast['relative_path'],
+                    "audio_duration_second": podcast['audio_duration_second']
                 }
                 for podcast in podcast_data['podcast_data']
-                for episode in podcast['episode_data']
             ]
             tasks['total_num'] = len(tasks['todo'])
             tasks['total_hour'] = sum(ep['audio_duration_second'] for ep in tasks['todo']) / 3600
@@ -38,9 +36,8 @@ def load_tasks(file_path):
 
     if len(tasks["processing"]) > 0:
         for k in tasks["processing"]:
-            podcast_name = tasks["processing"][k]["podcast_name"]
-            episode_name = os.path.splitext(os.path.basename(tasks["processing"][k]["episode_name"]))[0]
-            processing_dir = f"{OUTPUT_PATH}/{podcast_name}/{episode_name}"
+            relative_path = tasks["processing"][k]["relative_path"]
+            processing_dir = f"{OUTPUT_PATH}/{relative_path}"
             if os.path.exists(processing_dir):
                 logger.debug(f"please rm -rf {processing_dir}")
                 shutil.rmtree(processing_dir)
