@@ -366,7 +366,7 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
         setence_metadata = {
             "utt_id": file_name,
             "speaker_id": speaker_id,
-            "speaker_min_similarity": segment.get("min_similarity", 0.61),
+            "speaker_min_similarity": f'{segment.get("min_similarity", 0.61):.4f}',
             "language": segment.get('language', 'zh'),
             "time_range": {
                 "duration": segment.get("duration", 0.0),
@@ -377,12 +377,13 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
                 "text": segment.get("text", ""),
                 "val_text": segment.get("val_text", ""),
                 "norm_text": segment.get("norm_text", ""),
-                "wer": segment.get("wer", 0.),
+                "wer": f'{segment.get("wer", 0.):.4f}',
+                "avg_char_duration": f'{segment.get("avg_char_duration", 0.2):.4f}',
             },
             "metrics_info":{
-                "dnsmos": segment.get("dnsmos", 0.0),
-                "c50": segment.get("c50", 0.0),
-                "snr": segment.get("snr", 0.0),
+                "dnsmos": f'{segment.get("dnsmos", 0.0):.4f}',
+                "c50": f'{segment.get("c50", 0.0):.4f}',
+                "snr": f'{segment.get("snr", 0.0):.4f}',
             }
         }
         meta_info.add_sentence(setence_metadata)
@@ -420,6 +421,8 @@ def calculate_audio_stats(data, metrics_filter_cfg):
     all_audio_stats = []
     valid_audio_stats = []
     avg_durations = []
+    avg_char_durations = []
+
 
     # iterate over each entry in the JSON to collect the average duration of the phonemes
     for entry in data:
@@ -464,8 +467,9 @@ def calculate_audio_stats(data, metrics_filter_cfg):
             )  # average character duration within bounds
         ):
             valid_audio_stats.append((idx, duration))
+            avg_char_durations.append(avg_char_duration)
 
-    return valid_audio_stats, all_audio_stats
+    return valid_audio_stats, all_audio_stats, avg_char_durations
 
 
 def filter_manifest_by_report(manifest_entries, report_path):

@@ -94,7 +94,7 @@ def filter_by_metrics(metrics_list, metrics_filter_cfg):
         return []
 
     # --- Step 2: Perform other quality checks (e.g., char duration) ---
-    filtered_audio_stats, all_audio_stats = calculate_audio_stats(list_after_metrics_filter, metrics_filter_cfg)
+    filtered_audio_stats, all_audio_stats, avg_char_durations = calculate_audio_stats(list_after_metrics_filter, metrics_filter_cfg)
     filtered_segment = len(filtered_audio_stats)
     all_segment = len(all_audio_stats)
     
@@ -107,7 +107,11 @@ def filter_by_metrics(metrics_list, metrics_filter_cfg):
         f"> Secondary filters (char rate, etc.) removed: {all_segment - filtered_segment}/{all_segment} ({filter_percentage:.2%}) segments."
     )
     
-    final_filtered_list = [list_after_metrics_filter[idx] for idx, _ in filtered_audio_stats]
+    final_filtered_list = []
+    for idx_dur, avg_char_duration in zip(filtered_audio_stats, avg_char_durations):
+        valid_segment = list_after_metrics_filter[idx_dur[0]]
+        valid_segment['avg_char_duration'] = avg_char_duration
+        final_filtered_list.append(valid_segment)
     
     if not final_filtered_list:
         logger.warning("All segments were filtered out by secondary quality checks.")

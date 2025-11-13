@@ -25,7 +25,8 @@ META_INFO_TEMPLATE = {
                 "val_text": "今天天气真好。",
                 "norm_text": "今天天气真好。",
                 "language": "zh",
-                "wer": 0.15
+                "wer": 0.15,
+                "avg_char_duration": 0.2
             },
             "quality_info": {
                 "snr": 20,
