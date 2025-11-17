@@ -1,6 +1,7 @@
 # Core AI/ML Framework
-torch==2.8.0
-torchaudio==2.8.0
+torch==2.5.0
+torchaudio==2.5.0
+torchvision==0.20.0
 
 # Diarization & Speaker Verification
 # Using a specific version of pyannote.audio for stability.
@@ -20,7 +21,8 @@ scikit-learn
 # ASR Models
 # openai-whisper
 # google-generativeai
-funasr
+funasr==1.2.4
+aiohttp==3.9.2
 faster-whisper==1.1.0
 whisperx==3.3.0
 jiwer==4.0.0

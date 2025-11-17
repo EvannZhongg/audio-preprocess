@@ -6,7 +6,7 @@ RUN apt-get install -y vim net-tools lrzsz sox libsox-dev curl
 
 RUN conda create -y -n AudioPipeline python=3.9
 RUN conda install -n AudioPipeline ffmpeg -y
-RUN conda install -n AudioPipeline pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
+RUN conda install -n AudioPipeline pytorch=2.5.0 torchvision=0.20.0 torchaudio=2.5.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
 RUN mkdir -p /home/oicq/audio_preprocess
 RUN pwd

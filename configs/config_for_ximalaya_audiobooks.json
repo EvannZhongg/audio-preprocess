@@ -107,5 +107,5 @@
     "mos_model": {
         "primary_model_path": "ckpts/sig_bak_ovr.onnx"
     },
-    "huggingface_token": "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"
+    "huggingface_token": "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"
 }
