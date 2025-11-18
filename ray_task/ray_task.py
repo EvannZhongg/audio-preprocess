@@ -45,13 +45,14 @@ def handle_task(task, prefix_path, output_path):
     task
     {
         "relative_path": "xx",
+        "audio_path": "xx",
         "audio_duration_second": 0 
     }
     """
 
     try:
         relative_path = task["relative_path"]
-        input_audio_path = f"{prefix_path}/{relative_path}"
+        input_audio_path = task["audio_path"]
 
         task_key = get_task_key(task)
         ret = run_audio_preprocess_pipeline(input_audio_path, prefix_path, output_path, task_key)

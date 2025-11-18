@@ -61,6 +61,7 @@ def analyze_podcasts(base_path):
         audio_duration_second = get_audio_duration(audio_path) / 3600
         podcast_data.append({
             "relative_path": relative_path,
+            "audio_path": audio_path,
             "audio_duration_second": audio_duration_second,
         })
         podcast_total_seconds += audio_duration_second
