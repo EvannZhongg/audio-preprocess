@@ -58,7 +58,7 @@ def analyze_podcasts(base_path):
     for audio_path in tqdm(audio_paths, desc="Processing Podcasts"):
 
         relative_path = os.path.relpath(os.path.dirname(audio_path), base_path)
-        audio_duration_second = get_audio_duration(audio_path) / 3600
+        audio_duration_second = get_audio_duration(audio_path) 
         podcast_data.append({
             "relative_path": relative_path,
             "audio_path": audio_path,
@@ -70,7 +70,8 @@ def analyze_podcasts(base_path):
     podcast_data.sort(key=lambda x: x["audio_duration_second"], reverse=False)
 
     return {
-        "podcast_total_hour": podcast_total_seconds / 3600,
+        "audio_duration_second": podcast_total_seconds,
+        "audio_duration_hour": podcast_total_seconds / 3600,
         "podcast_data": podcast_data
     }
 
