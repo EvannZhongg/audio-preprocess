@@ -105,7 +105,7 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         if "whisper" not in cfg:
             raise ValueError("whisper configuration not found in config.json")
         model_path = cfg["whisper"].get("model", "openai/whisper-large-v3-turbo")
-        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
+        model_dir_cache = cfg["whisper"].get("model_dir_cache", "~/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
         if model_dir_cache and os.path.exists(model_dir_cache):
             model_path = model_dir_cache
         else:
@@ -184,7 +184,7 @@ def init_pipeline_global(config, cli_args):
         raise ValueError("huggingface_token must start with 'hf', check the config file.")
 
     pyannote_model = cfg["pyannote"].get("model", "pyannote/speaker-diarization-3.1")
-    pyannote_model_dir_cache = cfg["pyannote"].get("model_dir_cache", "/root/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml")
+    pyannote_model_dir_cache = cfg["pyannote"].get("model_dir_cache", "~/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml")
     if pyannote_model_dir_cache and os.path.exists(pyannote_model_dir_cache):
         pyannote_model_dir = pyannote_model_dir_cache
     else:
@@ -240,9 +240,11 @@ def init_pipeline_global(config, cli_args):
     PipelineParam.dnsmos_compute_score = dnsmos_compute_score
 
     if cfg["metrics"].get("use_brouhaha", False):
-        model_name = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
-        model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "/root/.cache/huggingface/hub/models--pyannote--brouhaha")
-        PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(model_name, cache_dir=model_dir_cache, token=cfg["huggingface_token"], device=device_name)
+        brouhaha_model = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
+        brouhaha_model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "~/.cache/huggingface/hub/models--pyannote--brouhaha")
+        if not os.path.exists(brouhaha_model_dir_cache):
+            brouhaha_model_dir_cache = None
+        PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(brouhaha_model, brouhaha_model_dir_cache, token=cfg["huggingface_token"], device=device_name)
 
     # Refinement Model
     refinement_cfg = cfg.get("embedding_refinement", {})
