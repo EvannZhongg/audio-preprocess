@@ -13,7 +13,7 @@ from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
 from ray_task.config import (OUTPUT_PATH, PODCAST_PATH,
-                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
+                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE, CONFIG_PATH)
 from ray_task.load_task import load_tasks
 from ray_task.podcast_sort import sort_podcast_todo_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
@@ -40,7 +40,7 @@ def get_task_key(task):
     task_key = task["relative_path"]
     return task_key
 
-def handle_task(task, prefix_path, output_path):
+def handle_task(config_path, task, prefix_path, output_path):
     """
     task
     {
@@ -55,7 +55,7 @@ def handle_task(task, prefix_path, output_path):
         input_audio_path = task["audio_path"]
 
         task_key = get_task_key(task)
-        ret = run_audio_preprocess_pipeline(input_audio_path, prefix_path, output_path, task_key)
+        ret = run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_path, task_key)
         # logger.debug(f"handle task={task} ret={ret}")
         return ret, task
     except Exception as e:
@@ -63,13 +63,13 @@ def handle_task(task, prefix_path, output_path):
         return "EXCEPTION", task
 
 @ray.remote(num_cpus=4, max_retries=0)
-def handle_task_ray_cpu(task, audio_prefix_path, output_path):
-    return handle_task(task, audio_prefix_path, output_path)
+def handle_task_ray_cpu(config_path, task, audio_prefix_path, output_path):
+    return handle_task(config_path, task, audio_prefix_path, output_path)
 
 # 目前gpu用的T4，一卡一任务
 @ray.remote(num_cpus=4, num_gpus=1, max_retries=0)
-def handle_task_ray_gpu(task, audio_prefix_path, output_path):
-    return handle_task(task, audio_prefix_path, output_path)
+def handle_task_ray_gpu(config_path, task, audio_prefix_path, output_path):
+    return handle_task(config_path, task, audio_prefix_path, output_path)
 
 def get_optimal_task_function():
     """根据可用资源返回最优的任务函数"""
@@ -134,7 +134,7 @@ def run():
                 save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
                 optimal_task_func = get_optimal_task_function()
-                result_ref = optimal_task_func.remote(task, PODCAST_PATH, OUTPUT_PATH)
+                result_ref = optimal_task_func.remote(CONFIG_PATH, task, PODCAST_PATH, OUTPUT_PATH)
                 result_refs.append(result_ref)
                 result_ref_map[result_ref] = task
             else:

@@ -11,6 +11,7 @@
 # REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"
 
 # 新数据配置参数
+CONFIG_PATH = "./configs/config.json"
 PODCAST_PATH = "/cfs/cfs-czb184s7/DATA/webdata/2009677179_zx19930111"
 OUTPUT_PATH = "/cfs/cfs-czb184s7/PROCESSED_DATA/webdata/2009677179_zx19930111"
 
