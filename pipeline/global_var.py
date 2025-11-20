@@ -62,12 +62,12 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         funasr_model_dir_cache = cfg["funasr"].get("model_dir_cache", "iic/SenseVoiceSmall")
         funasr_vad_model_dir_cache = cfg["funasr"].get("vad_model_dir_cache", "fsmn-vad")
 
-        if funasr_model_dir_cache and os.path.exists(funasr_model_dir_cache):
+        if funasr_model_dir_cache and os.path.exists(os.path.expanduser(funasr_model_dir_cache)):
             funasr_model_dir = funasr_model_dir_cache
         else:
             funasr_model_dir = funasr_model
 
-        if funasr_vad_model_dir_cache and os.path.exists(funasr_vad_model_dir_cache):
+        if funasr_vad_model_dir_cache and os.path.exists(os.path.expanduser(funasr_vad_model_dir_cache)):
             funasr_vad_model_dir = funasr_vad_model_dir_cache
         else:
             funasr_vad_model_dir = funasr_vad_model
@@ -84,17 +84,17 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         vad_model_dir_cache = cfg["paraformer"].get("vad_model_dir_cache", "iic/fsmn-vad")
         punc_model_dir_cache = cfg["paraformer"].get("punc_model_dir_cache", "iic/ct-punc-c")
 
-        if paraformer_model_dir_cache and os.path.exists(paraformer_model_dir_cache):
+        if paraformer_model_dir_cache and os.path.exists(os.path.expanduser(paraformer_model_dir_cache)):
             paraformer_model_dir = paraformer_model_dir_cache
         else:
             paraformer_model_dir = paraformer_model
 
-        if vad_model_dir_cache and os.path.exists(vad_model_dir_cache):
+        if vad_model_dir_cache and os.path.exists(os.path.expanduser(vad_model_dir_cache)):
             vad_model_dir = vad_model_dir_cache
         else:
             vad_model_dir = vad_model
 
-        if punc_model_dir_cache and os.path.exists(punc_model_dir_cache):
+        if punc_model_dir_cache and os.path.exists(os.path.expanduser(punc_model_dir_cache)):
             punc_model_dir = punc_model_dir_cache
         else:
             punc_model_dir = punc_model
@@ -106,7 +106,7 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             raise ValueError("whisper configuration not found in config.json")
         model_path = cfg["whisper"].get("model", "openai/whisper-large-v3-turbo")
         model_dir_cache = cfg["whisper"].get("model_dir_cache", "~/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
-        if model_dir_cache and os.path.exists(model_dir_cache):
+        if model_dir_cache and os.path.exists(os.path.expanduser(model_dir_cache)):
             model_path = model_dir_cache
         else:
             model_path = model_path
@@ -185,7 +185,7 @@ def init_pipeline_global(config, cli_args):
 
     pyannote_model = cfg["pyannote"].get("model", "pyannote/speaker-diarization-3.1")
     pyannote_model_dir_cache = cfg["pyannote"].get("model_dir_cache", "~/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml")
-    if pyannote_model_dir_cache and os.path.exists(pyannote_model_dir_cache):
+    if pyannote_model_dir_cache and os.path.exists(os.path.expanduser(pyannote_model_dir_cache)):
         pyannote_model_dir = pyannote_model_dir_cache
     else:
         pyannote_model_dir = pyannote_model
@@ -242,7 +242,7 @@ def init_pipeline_global(config, cli_args):
     if cfg["metrics"].get("use_brouhaha", False):
         brouhaha_model = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
         brouhaha_model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "~/.cache/huggingface/hub/models--pyannote--brouhaha")
-        if not os.path.exists(brouhaha_model_dir_cache):
+        if not os.path.exists(os.path.expanduser(brouhaha_model_dir_cache)):
             brouhaha_model_dir_cache = None
         PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(brouhaha_model, brouhaha_model_dir_cache, token=cfg["huggingface_token"], device=device_name)
 
