@@ -19,27 +19,27 @@
     },
     "funasr": {
         "model": "iic/SenseVoiceSmall",
-        "model_dir_cache": "~/.cache/modelscope/hub/models/iic/SenseVoiceSmall",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall",
         "vad_model": "fsmn-vad",
-        "vad_model_dir_cache": "~/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
     },
     "paraformer": {
         "model": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "model_revision": "v2.0.4",
-        "model_dir_cache": "~/.cache/modelscope/hub/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "vad_model": "fsmn-vad",
-        "vad_model_dir_cache": "~/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "punc_model_dir_cache": "~/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
+        "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
     },
     "whisper":{
         "model": "openai/whisper-large-v3-turbo",
-        "model_dir_cache": "~/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"
     },
     "diarization_provider": "pyannote",
     "pyannote": {
         "model": "pyannote/speaker-diarization-3.1",
-        "model_dir_cache": "~/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml"
+        "model_dir_cache": "ckpts/pyannote_config.yaml"
     },
     "gemini": {
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
@@ -101,7 +101,7 @@
         "use_brouhaha": true,
         "brouhaha":{
             "model": "pyannote/brouhaha",
-            "model_dir_cache": "~/.cache/huggingface/hub/models--pyannote--brouhaha"
+            "model_dir_cache": "/root/.cache/huggingface/hub/models--pyannote--brouhaha"
         }
     },
     "mos_model": {

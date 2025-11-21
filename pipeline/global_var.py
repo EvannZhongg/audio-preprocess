@@ -1,6 +1,7 @@
 import os
 
 import torch
+import yaml
 from pyannote.audio import Pipeline
 
 from models import (brouhaha_metrics, dnsmos, funasr_asr, separate_fast,
@@ -59,8 +60,8 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
 
         funasr_model = cfg["funasr"].get("model", "iic/SenseVoiceSmall")
         funasr_vad_model = cfg["funasr"].get("vad_model", "fsmn-vad")
-        funasr_model_dir_cache = os.path.expanduser(cfg["funasr"].get("model_dir_cache", "iic/SenseVoiceSmall"))
-        funasr_vad_model_dir_cache = os.path.expanduser(cfg["funasr"].get("vad_model_dir_cache", "fsmn-vad"))
+        funasr_model_dir_cache = cfg["funasr"].get("model_dir_cache", "iic/SenseVoiceSmall")
+        funasr_vad_model_dir_cache = cfg["funasr"].get("vad_model_dir_cache", "fsmn-vad")
 
         if funasr_model_dir_cache and os.path.exists(funasr_model_dir_cache):
             funasr_model_dir = funasr_model_dir_cache
@@ -80,9 +81,9 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         paraformer_model = cfg["paraformer"].get("model", "paraformer-zh")
         vad_model = cfg["paraformer"].get("vad_model", "fsmn-vad")
         punc_model = cfg["paraformer"].get("punc_model", "ct-punc-c")
-        paraformer_model_dir_cache = os.path.expanduser(cfg["paraformer"].get("model_dir_cache", "iic/paraformer-zh"))
-        vad_model_dir_cache = os.path.expanduser(cfg["paraformer"].get("vad_model_dir_cache", "iic/fsmn-vad"))
-        punc_model_dir_cache = os.path.expanduser(cfg["paraformer"].get("punc_model_dir_cache", "iic/ct-punc-c"))
+        paraformer_model_dir_cache = cfg["paraformer"].get("model_dir_cache", "iic/paraformer-zh")
+        vad_model_dir_cache = cfg["paraformer"].get("vad_model_dir_cache", "iic/fsmn-vad")
+        punc_model_dir_cache = cfg["paraformer"].get("punc_model_dir_cache", "iic/ct-punc-c")
 
         if paraformer_model_dir_cache and os.path.exists(paraformer_model_dir_cache):
             paraformer_model_dir = paraformer_model_dir_cache
@@ -105,7 +106,7 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         if "whisper" not in cfg:
             raise ValueError("whisper configuration not found in config.json")
         model_path = cfg["whisper"].get("model", "openai/whisper-large-v3-turbo")
-        model_dir_cache = os.path.expanduser(cfg["whisper"].get("model_dir_cache", "~/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"))
+        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
         if model_dir_cache and os.path.exists(model_dir_cache):
             model_path = model_dir_cache
         else:
@@ -184,9 +185,17 @@ def init_pipeline_global(config, cli_args):
         raise ValueError("huggingface_token must start with 'hf', check the config file.")
 
     pyannote_model = cfg["pyannote"].get("model", "pyannote/speaker-diarization-3.1")
-    pyannote_model_dir_cache = os.path.expanduser(cfg["pyannote"].get("model_dir_cache", "~/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml"))
+    pyannote_model_dir_cache = cfg["pyannote"].get("model_dir_cache", "/root/.cache/torch/pyannote/models--pyannote--speaker-diarization-3.1/snapshots/84fd25912480287da0247647c3d2b4853cb3ee5d/config.yaml")
+    
     if pyannote_model_dir_cache and os.path.exists(pyannote_model_dir_cache):
-        pyannote_model_dir = pyannote_model_dir_cache
+        with open(pyannote_model_dir_cache, "r") as fp:
+            pyannote_config = yaml.load(fp, Loader=yaml.SafeLoader)
+        segmentation_model = pyannote_config["pipeline"]["params"]["segmentation"]
+        embedding_model = pyannote_config["pipeline"]["params"]["embedding"]
+        if os.path.exists(segmentation_model) and os.path.exists(embedding_model):
+            pyannote_model_dir = pyannote_model_dir_cache
+        else:
+            pyannote_model_dir = pyannote_model
     else:
         pyannote_model_dir = pyannote_model
     dia_pipeline = Pipeline.from_pretrained(
@@ -241,7 +250,7 @@ def init_pipeline_global(config, cli_args):
 
     if cfg["metrics"].get("use_brouhaha", False):
         brouhaha_model = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
-        brouhaha_model_dir_cache = os.path.expanduser(cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "~/.cache/huggingface/hub/models--pyannote--brouhaha"))
+        brouhaha_model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "/root/.cache/huggingface/hub/models--pyannote--brouhaha")
         if not os.path.exists(brouhaha_model_dir_cache):
             brouhaha_model_dir_cache = None
         PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(brouhaha_model, brouhaha_model_dir_cache, token=cfg["huggingface_token"], device=device_name)
