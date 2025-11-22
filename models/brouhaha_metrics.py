@@ -8,14 +8,14 @@ from pyannote.audio import Model
 
 class ComputeScore:
 
-    def __init__(self, model: str, cache_dir: str, token, device: str = 'cpu'):
+    def __init__(self, model: str, token, device: str = 'cpu'):
         super().__init__()
-        self._load_model(model, cache_dir, token, device)
+        self._load_model(model, token, device)
 
-    def _load_model(self, model, cache_dir, token, device):
+    def _load_model(self, model, token, device):
 
         self.model = Model.from_pretrained(
-            model, cache_dir=cache_dir, strict=False, device=device, use_auth_token=token
+            model, strict=False, device=device, use_auth_token=token
         )
         self.pipeline = RegressiveActivityDetectionPipeline(self.model)
 

@@ -101,7 +101,7 @@
         "use_brouhaha": true,
         "brouhaha":{
             "model": "pyannote/brouhaha",
-            "model_dir_cache": "/root/.cache/huggingface/hub/models--pyannote--brouhaha"
+            "model_dir_cache": "/root/.cache/huggingface/hub/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin"
         }
     },
     "mos_model": {

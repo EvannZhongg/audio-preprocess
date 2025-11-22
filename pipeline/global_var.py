@@ -250,10 +250,10 @@ def init_pipeline_global(config, cli_args):
 
     if cfg["metrics"].get("use_brouhaha", False):
         brouhaha_model = cfg["metrics"].get('brouhaha', {}).get("model", "pyannote/brouhaha")
-        brouhaha_model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "/root/.cache/huggingface/hub/models--pyannote--brouhaha")
-        if not os.path.exists(brouhaha_model_dir_cache):
-            brouhaha_model_dir_cache = None
-        PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(brouhaha_model, brouhaha_model_dir_cache, token=cfg["huggingface_token"], device=device_name)
+        brouhaha_model_dir_cache = cfg["metrics"].get('brouhaha', {}).get("model_dir_cache", "/root/.cache/huggingface/hub/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin")
+        if brouhaha_model_dir_cache and os.path.exists(brouhaha_model_dir_cache):
+            brouhaha_model = brouhaha_model_dir_cache
+        PipelineParam.brouhaha_metric = brouhaha_metrics.ComputeScore(brouhaha_model, token=cfg["huggingface_token"], device=device_name)
 
     # Refinement Model
     refinement_cfg = cfg.get("embedding_refinement", {})
