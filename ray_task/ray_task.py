@@ -119,11 +119,11 @@ def run():
                 continue
 
             # if task["audio_duration_second"] < 600:
-            if task["audio_duration_second"] < 60:
+            if task["audio_duration_second"] < 10:
                 need_delete_task_key.append(task_key)
                 continue
 
-            check_dirty_data(task)
+            # check_dirty_data(task)
 
             # handle ray task
             MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4)
