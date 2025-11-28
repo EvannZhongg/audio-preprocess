@@ -12,8 +12,9 @@ from utils.logger import Logger
 
 logger = Logger.get_logger(f"ray-task")
 
-from ray_task.config import (OUTPUT_PATH, PODCAST_PATH,
-                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE, CONFIG_PATH)
+from ray_task.config import (CONFIG_PATH, DATASET_NAME, OUTPUT_PATH,
+                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
+                             TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.podcast_sort import sort_podcast_todo_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
@@ -85,7 +86,7 @@ def print_progress(tasks):
     global last_send_bot_msg
     total_hour = tasks["total_hour"]
     handled_hour = tasks["complete_total_hour"]
-    log_str = f"audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
+    log_str = f"{DATASET_NAME}: audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
     logger.debug(log_str)
     if time.time() - last_send_bot_msg > 3600 * 6:
         last_send_bot_msg = time.time()
@@ -101,6 +102,8 @@ def check_dirty_data(task):
 
 
 def run():
+    
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
     tasks = load_tasks(TASK_RESULT_FILE)
 
     result_refs = []

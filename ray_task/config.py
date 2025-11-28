@@ -10,12 +10,17 @@
 # TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
 # REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"
 
-# 新数据配置参数
-CONFIG_PATH = "./configs/config.json"
-PODCAST_PATH = "/cfs/cfs-czb184s7/DATA/webdata/2009677179_zx19930111"
-OUTPUT_PATH = "/cfs/cfs-czb184s7/PROCESSED_DATA/webdata/2009677179_zx19930111"
+# audiobooks/有声小说2
+DATASET_NAME = "audiobooks/有声小说2"
+CONFIG_PATH = "./configs/config_for_ximalaya_audiobooks.json"
+PODCAST_PATH = f"/cfs/cfs-czb184s7/DATA/webdata/{DATASET_NAME}"
+OUTPUT_PATH = f"/cfs/cfs-czb184s7/PROCESSED_DATA/webdata/{DATASET_NAME}"
 
-PODCAST_DATA_FILE = f"{PODCAST_PATH}/podcast_data.json"
+
+
+
+
+PODCAST_DATA_FILE = f"{PODCAST_PATH}/data_list.json"
 TASK_RESULT_FILE = f"{OUTPUT_PATH}/ray_task_result.json"
 TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
 REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"
