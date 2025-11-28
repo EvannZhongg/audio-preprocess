@@ -18,8 +18,6 @@ OUTPUT_PATH = f"/cfs/cfs-czb184s7/PROCESSED_DATA/webdata/{DATASET_NAME}"
 
 
 
-
-
 PODCAST_DATA_FILE = f"{PODCAST_PATH}/data_list.json"
 TASK_RESULT_FILE = f"{OUTPUT_PATH}/ray_task_result.json"
 TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
