@@ -1,10 +1,10 @@
 import json
 import os
-import shutil
 import re
+import shutil
 from pathlib import Path
 
-from ray_task.config import OUTPUT_PATH, PODCAST_DATA_FILE
+from ray_task.config import OUTPUT_ROOT_DIR, PODCAST_DATA_FILE
 from utils.logger import Logger
 
 logger = Logger.get_logger()
@@ -42,7 +42,7 @@ def load_tasks(file_path):
             relative_path = tasks["processing"][k]["relative_path"]
             audio_path = tasks["processing"][k]["audio_path"]
             fid = re.sub(r"['\"\s]", "", Path(audio_path).stem)
-            processing_dir = f"{OUTPUT_PATH}/{relative_path}/{fid}"
+            processing_dir = f"{OUTPUT_ROOT_DIR}/{relative_path}/{fid}"
             if os.path.exists(processing_dir):
                 logger.debug(f"please rm -rf {processing_dir}")
                 shutil.rmtree(processing_dir)

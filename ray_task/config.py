@@ -10,15 +10,24 @@
 # TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
 # REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"
 
+
+# audiobooks/有声小说1
+DATASET_NAME = "audiobooks/有声小说1"
 # audiobooks/有声小说2
 DATASET_NAME = "audiobooks/有声小说2"
+
+
+
 CONFIG_PATH = "./configs/config_for_ximalaya_audiobooks.json"
-PODCAST_PATH = f"/cfs/cfs-czb184s7/DATA/webdata/{DATASET_NAME}"
-OUTPUT_PATH = f"/cfs/cfs-czb184s7/PROCESSED_DATA/webdata/{DATASET_NAME}"
+PODCAST_PATH = "/cfs/cfs-czb184s7/DATA/webdata"
+OUTPUT_ROOT_DIR="/cfs/cfs-czb184s7/PROCESSED_DATA/webdata"
+OUTPUT_PATH = f"{OUTPUT_ROOT_DIR}/{DATASET_NAME}"
+PODCAST_DATA_FILE = f"{PODCAST_PATH}/{DATASET_NAME}/data_list.json"
 
 
 
-PODCAST_DATA_FILE = f"{PODCAST_PATH}/data_list.json"
+
+
 TASK_RESULT_FILE = f"{OUTPUT_PATH}/ray_task_result.json"
 TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
 REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"

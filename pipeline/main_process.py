@@ -90,7 +90,7 @@ def main_process(manifest_entry, output_folder, report_path):
     diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
 
     # Rename speaker labels to be unique for the batch run
-    file_hash = get_short_hash(audio_path) # Use full path for uniqueness
+    file_hash = get_short_hash(audio_path, length=8) # Use full path for uniqueness
     speaker_mapping = {
         old_speaker: f"SPK_{file_hash}_{old_speaker.split('_')[-1]}"
         for old_speaker in diarize_df["speaker"].unique()

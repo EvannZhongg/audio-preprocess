@@ -10,7 +10,6 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(processName)s - %(levelname)s - %(message)s',
@@ -29,7 +28,8 @@ def get_file_size_cached(file_path: str) -> int:
 
 def parse_path_mappings(mapping_args):
     mappings = []
-    for item in mapping_args or []:
+    mappings_list = mapping_args.split(',')
+    for item in mappings_list or []:
         if '=' not in item:
             raise ValueError(f"Invalid path mapping: {item}. Expected 'old=new'")
         old, new = item.split('=', 1)
@@ -88,16 +88,15 @@ def validate_audio_pydub(file_path: str):
         return False, None, f"解码失败: {str(e)}"
 
 
-def process_file(file_path: str, base_path: str, path_mappings_serialized):
+def process_file(file_path: str, base_path: str, base_dir: str,  path_mappings_serialized):
     file_path = Path(file_path)
     base_path = Path(base_path)
+    base_dir = Path(base_dir)
 
-    # 应用路径映射
     mappings = [(Path(old), Path(new)) for old, new in path_mappings_serialized] if path_mappings_serialized else []
     try:
-        relative_dir = file_path.parent.relative_to(base_path)
-        mapped_relative_path = apply_path_mappings(base_path / relative_dir, mappings)
-        # 转为相对于新基路径的相对路径（若存在映射）
+        relative_dir = file_path.parent.relative_to(base_dir)
+        mapped_relative_path = apply_path_mappings(base_dir / relative_dir, mappings)
         if mappings:
             new_base = mappings[0][1]
             final_relative = mapped_relative_path.relative_to(new_base)
@@ -105,6 +104,8 @@ def process_file(file_path: str, base_path: str, path_mappings_serialized):
             final_relative = relative_dir
     except Exception as e:
         return {"status": "invalid", "path": str(file_path), "reason": f"路径计算失败: {e}"}
+    
+    new_file_path = apply_path_mappings(file_path, mappings)
 
     file_size = get_file_size_cached(str(file_path))
     if file_size < 1024:
@@ -117,13 +118,13 @@ def process_file(file_path: str, base_path: str, path_mappings_serialized):
     return {
         "status": "valid",
         "relative_path": str(final_relative).replace('\\', '/'),
-        "audio_path": str(file_path),
+        "audio_path": str(new_file_path),
         "audio_duration_second": int(duration_ms // 1000),
         "file_size_mb": round(file_size / (1024 * 1024), 2)
     }
 
 
-def analyze_audio_files_parallel(base_path: str, max_workers=None, path_mappings=None):
+def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None):
     if max_workers is None:
         max_workers = min(multiprocessing.cpu_count(), 64)
 
@@ -144,7 +145,7 @@ def analyze_audio_files_parallel(base_path: str, max_workers=None, path_mappings
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(process_file, fp, base_path, path_mappings_serialized): fp
+            executor.submit(process_file, fp, base_path, base_dir, path_mappings_serialized): fp
             for fp in audio_files
         }
 
@@ -180,14 +181,17 @@ def analyze_audio_files_parallel(base_path: str, max_workers=None, path_mappings
 def main():
     parser = argparse.ArgumentParser(description='音频分析工具（基于 pydub）')
     parser.add_argument('--path', type=str,
-                       default="/cfs/cfs-czb184s7/DATA/webdata/audiobooks",
+                       default="/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说7",
+                       help='当前音频数据目录')
+    parser.add_argument('--base_dir', type=str,
+                       default="/apdcephfs/tts_common/DATA/webdata",
                        help='音频根目录')
-    parser.add_argument('--output', type=str, default='podcast_data.json',
+    parser.add_argument('--output', type=str, default='/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说7/data_list.json',
                        help='输出 JSON 文件')
     parser.add_argument('--max-workers', type=int, default=None)
     parser.add_argument('--log-level', type=str, default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
-    parser.add_argument('--path-mapping', action='append', default=[],
+    parser.add_argument('--path-mapping', type=str, default='/apdcephfs/tts_common/DATA/webdata=/cfs/cfs-czb184s7/DATA/webdata',
                        help='路径映射，如: /old=/new')
 
     args = parser.parse_args()
@@ -197,6 +201,8 @@ def main():
     if not base_path.exists():
         logger.error(f"错误: 路径不存在 {base_path}")
         return
+    
+    base_dir = Path(args.base_dir).resolve()
 
     # 检查 pydub 和 ffmpeg
     try:
@@ -223,7 +229,7 @@ def main():
 
     import time
     start_time = time.time()
-    result = analyze_audio_files_parallel(str(base_path), args.max_workers, path_mappings)
+    result = analyze_audio_files_parallel(str(base_path), str(base_dir),  args.max_workers, path_mappings)
     end_time = time.time()
     result["processing_time_seconds"] = round(end_time - start_time, 2)
 

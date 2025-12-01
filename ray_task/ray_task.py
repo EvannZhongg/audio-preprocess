@@ -13,8 +13,8 @@ from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
 from ray_task.config import (CONFIG_PATH, DATASET_NAME, OUTPUT_PATH,
-                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
-                             TASK_RESULT_FILE)
+                             OUTPUT_ROOT_DIR, PODCAST_PATH,
+                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.podcast_sort import sort_podcast_todo_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
@@ -56,7 +56,7 @@ def handle_task(config_path, task, prefix_path, output_path):
         input_audio_path = task["audio_path"]
 
         task_key = get_task_key(task)
-        ret = run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_path, task_key)
+        ret = run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_path)
         # logger.debug(f"handle task={task} ret={ret}")
         return ret, task
     except Exception as e:
@@ -137,7 +137,7 @@ def run():
                 save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
                 optimal_task_func = get_optimal_task_function()
-                result_ref = optimal_task_func.remote(CONFIG_PATH, task, PODCAST_PATH, OUTPUT_PATH)
+                result_ref = optimal_task_func.remote(CONFIG_PATH, task, PODCAST_PATH, OUTPUT_ROOT_DIR)
                 result_refs.append(result_ref)
                 result_ref_map[result_ref] = task
             else:

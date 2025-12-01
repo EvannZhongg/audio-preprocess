@@ -25,7 +25,7 @@ class TaskCmdArgs:
     threads: int = 4
 
 
-def run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_dir, task_key):
+def run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_dir):
     main_cfg = load_cfg(config_path)
     cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', threads=4)
     logger.info(f"pipeline config={main_cfg} cli_args={cli_args}")
