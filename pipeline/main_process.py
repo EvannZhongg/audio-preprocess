@@ -74,10 +74,13 @@ def main_process(manifest_entry, output_folder, report_path):
 
     os.makedirs(save_path, exist_ok=True)
     logger.debug(f"Processing audio: {audio_path}, save to: {save_path}")
-    meta_info.update_origin(raw_audio_path=audio_path)
 
     logger.info("Step 0: Preprocess all audio files --> 24k sample rate + wave format + loudnorm + bit depth 16")
     audio = standardization(audio_path)
+    
+    meta_info.update_origin(raw_audio_path=audio_path)
+    meta_info.update_origin(sample_rate=audio['sample_rate'])
+    meta_info.update_origin(duration=audio['duation'])
 
     logger.info("Step 1: Source Separation")
     # Add a check in config to decide whether to run this step

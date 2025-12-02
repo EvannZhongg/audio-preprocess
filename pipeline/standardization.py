@@ -1,9 +1,10 @@
 import os
+
 import numpy as np
 from pydub import AudioSegment
 
-from utils.logger import time_logger
 from pipeline.global_var import PipelineParam
+from utils.logger import time_logger
 
 logger = PipelineParam.logger
 
@@ -72,4 +73,5 @@ def standardization(audio):
         "waveform": waveform,
         "name": name,
         "sample_rate": cfg["entrypoint"]["SAMPLE_RATE"],
+        "duation": audio.duration_seconds
     }
