@@ -7,8 +7,23 @@ import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
+import time
+import subprocess 
+import json as standard_json 
 
 from tqdm import tqdm
+
+
+_GLOBAL_CONFIGS = {}
+_GLOBAL_MAPPINGS = []
+
+def init_worker(base_dir_str, path_mappings_serialized):
+    global _GLOBAL_CONFIGS, _GLOBAL_MAPPINGS
+    _GLOBAL_CONFIGS['base_dir'] = Path(base_dir_str)
+    _GLOBAL_MAPPINGS = [
+        (Path(old), Path(new)) for old, new in path_mappings_serialized
+    ]
+    
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger('audio_analyzer')
 
 
-@lru_cache(maxsize=10000)
+@lru_cache(maxsize=100000) 
 def get_file_size_cached(file_path: str) -> int:
     try:
         return os.path.getsize(file_path)
@@ -36,15 +51,18 @@ def parse_path_mappings(mapping_args):
         mappings.append((Path(old).resolve(), Path(new).resolve()))
     return mappings
 
-
-def apply_path_mappings(path: Path, mappings):
+@lru_cache(maxsize=100000)
+def apply_path_mappings_cached(path_str: str, mappings_tuple):
+    path = Path(path_str)
+    mappings = [(Path(old), Path(new)) for old, new in mappings_tuple]
+    
     for old_prefix, new_prefix in mappings:
         try:
             if path.is_relative_to(old_prefix):
-                return new_prefix / path.relative_to(old_prefix)
+                return str(new_prefix / path.relative_to(old_prefix))
         except ValueError:
             continue
-    return path
+    return str(path)
 
 
 def get_audio_files(folder_path: str):
@@ -55,48 +73,101 @@ def get_audio_files(folder_path: str):
     for root, dirs, files in os.walk(folder_path, followlinks=False):
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
 
-        with os.scandir(root) as it:
-            for entry in it:
-                if not entry.is_file():
-                    continue
+        try:
+            with os.scandir(root) as it:
+                for entry in it:
+                    if not entry.is_file():
+                        continue
 
-                name = entry.name
-                if name.startswith(('.', '~', '._')) or '.temp' in name:
-                    continue
+                    name = entry.name
+                    if name.startswith(('.', '~', '._')) or '.temp' in name:
+                        continue
 
-                if not entry.path.lower().endswith(audio_extensions):
-                    continue
+                    if not name.lower().endswith(audio_extensions):
+                        continue
 
-                size = get_file_size_cached(entry.path)
-                if size < 1024:
-                    continue
+                    try:
+                        size = entry.stat().st_size
+                    except OSError:
+                        # Fallback to general get_file_size_cached
+                        size = get_file_size_cached(entry.path) 
 
-                audio_files.append(entry.path)
+                    if size < 1024:
+                        continue
+
+                    audio_files.append(entry.path)
+        except OSError as e:
+            logger.warning(f"无法扫描目录 {root}: {e}")
 
     return audio_files
 
+# --- 性能关键点：音频验证函数 (使用 ffprobe 加速) ---
 
-def validate_audio_pydub(file_path: str):
+def validate_audio_pydub_fallback(file_path: str):
     try:
         from pydub import AudioSegment
         audio = AudioSegment.from_file(file_path)
         duration_ms = len(audio)
-        if duration_ms <= 0 or duration_ms > 86400000:  # >24小时
-            return False, None, "时长异常"
+        if duration_ms <= 0 or duration_ms > 86400000:
+            return False, None, "时长异常 (pydub)"
         return True, duration_ms, None
     except Exception as e:
-        return False, None, f"解码失败: {str(e)}"
+        return False, None, f"解码失败 (pydub): {str(e)}"
 
 
-def process_file(file_path: str, base_path: str, base_dir: str,  path_mappings_serialized):
+def validate_audio(file_path: str):
+    ffprobe_cmd = [
+        'ffprobe',
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'json',
+        file_path
+    ]
+    
+    try:
+        result = subprocess.run(
+            ffprobe_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+            timeout=10 # 设置超时，防止文件损坏导致卡死
+        )
+        
+        data = standard_json.loads(result.stdout)
+        
+        if 'format' not in data or 'duration' not in data['format']:
+            return validate_audio_pydub_fallback(file_path)
+
+        duration_s = float(data['format']['duration'])
+        duration_ms = int(duration_s * 1000)
+
+        if duration_ms <= 0 or duration_ms > 86400000:
+            return False, None, "时长异常 (ffprobe)"
+            
+        return True, duration_ms, None
+        
+    except (subprocess.CalledProcessError, FileNotFoundError, standard_json.JSONDecodeError):
+        return validate_audio_pydub_fallback(file_path)
+    except Exception as e:
+        return False, None, f"ffprobe 失败: {str(e)}"
+
+
+def process_file_optimized(file_path: str):
     file_path = Path(file_path)
-    base_path = Path(base_path)
-    base_dir = Path(base_dir)
+    
+    base_dir = _GLOBAL_CONFIGS.get('base_dir')
+    mappings = _GLOBAL_MAPPINGS
+    mappings_tuple = tuple(tuple(str(p) for p in m) for m in mappings) 
 
-    mappings = [(Path(old), Path(new)) for old, new in path_mappings_serialized] if path_mappings_serialized else []
+    if not base_dir:
+        return {"status": "invalid", "path": str(file_path), "reason": "进程未正确初始化 (BaseDir缺失)"}
+
     try:
         relative_dir = file_path.parent.relative_to(base_dir)
-        mapped_relative_path = apply_path_mappings(base_dir / relative_dir, mappings)
+        
+        mapped_relative_path_str = apply_path_mappings_cached(str(base_dir / relative_dir), mappings_tuple)
+        mapped_relative_path = Path(mapped_relative_path_str)
+        
         if mappings:
             new_base = mappings[0][1]
             final_relative = mapped_relative_path.relative_to(new_base)
@@ -105,24 +176,24 @@ def process_file(file_path: str, base_path: str, base_dir: str,  path_mappings_s
     except Exception as e:
         return {"status": "invalid", "path": str(file_path), "reason": f"路径计算失败: {e}"}
     
-    new_file_path = apply_path_mappings(file_path, mappings)
+    new_file_path_str = apply_path_mappings_cached(str(file_path), mappings_tuple)
 
     file_size = get_file_size_cached(str(file_path))
     if file_size < 1024:
         return {"status": "invalid", "path": str(file_path), "reason": "文件过小 (<1KB)"}
 
-    is_valid, duration_ms, error = validate_audio_pydub(str(file_path))
+
+    is_valid, duration_ms, error = validate_audio(str(file_path))
     if not is_valid:
         return {"status": "invalid", "path": str(file_path), "reason": error}
 
     return {
         "status": "valid",
         "relative_path": str(final_relative).replace('\\', '/'),
-        "audio_path": str(new_file_path),
+        "audio_path": new_file_path_str,
         "audio_duration_second": int(duration_ms // 1000),
         "file_size_mb": round(file_size / (1024 * 1024), 2)
     }
-
 
 def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None):
     if max_workers is None:
@@ -135,17 +206,21 @@ def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None
         return {"error": "未找到音频文件"}
 
     logger.info(f"找到 {len(audio_files)} 个候选文件")
-    logger.info(f"开始并行处理（{max_workers} 进程）...")
+    logger.info(f"开始并行处理（{max_workers} 进程...")
 
-    path_mappings_serialized = [(str(old), str(new)) for old, new in path_mappings] if path_mappings else None
+    path_mappings_serialized = [(str(old), str(new)) for old, new in path_mappings] if path_mappings else []
 
     valid_files = []
     invalid_files = []
     total_duration = 0
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ProcessPoolExecutor(
+        max_workers=max_workers,
+        initializer=init_worker, 
+        initargs=(base_dir, path_mappings_serialized,)
+    ) as executor:
         futures = {
-            executor.submit(process_file, fp, base_path, base_dir, path_mappings_serialized): fp
+            executor.submit(process_file_optimized, fp): fp
             for fp in audio_files
         }
 
@@ -167,7 +242,7 @@ def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None
             else:
                 invalid_files.append(result)
 
-    valid_files.sort(key=lambda x: x["audio_duration_second"])
+    # valid_files.sort(key=lambda x: x["audio_duration_second"])
 
     return {
         "audio_duration_second": int(total_duration),
@@ -181,12 +256,12 @@ def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None
 def main():
     parser = argparse.ArgumentParser(description='音频分析工具（基于 pydub）')
     parser.add_argument('--path', type=str,
-                       default="/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说7",
+                       default="/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说1",
                        help='当前音频数据目录')
     parser.add_argument('--base_dir', type=str,
                        default="/apdcephfs/tts_common/DATA/webdata",
                        help='音频根目录')
-    parser.add_argument('--output', type=str, default='/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说7/data_list.json',
+    parser.add_argument('--output', type=str, default='/apdcephfs/tts_common/DATA/webdata/audiobooks/有声小说1/data_list.json',
                        help='输出 JSON 文件')
     parser.add_argument('--max-workers', type=int, default=None)
     parser.add_argument('--log-level', type=str, default='INFO',
@@ -204,7 +279,6 @@ def main():
     
     base_dir = Path(args.base_dir).resolve()
 
-    # 检查 pydub 和 ffmpeg
     try:
         from pydub import AudioSegment
         logger.info("✅ pydub 已安装")
@@ -213,12 +287,11 @@ def main():
         return
 
     try:
-        import subprocess
+        subprocess.run(['ffprobe', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         subprocess.run(['ffmpeg', '-version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        logger.info("✅ ffmpeg 可用")
+        logger.info("✅ ffmpeg/ffprobe 可用")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        logger.error("❌ 请安装 ffmpeg（pydub 依赖）")
-        logger.error("Ubuntu: sudo apt install ffmpeg | Windows: https://www.gyan.dev/ffmpeg/builds/")
+        logger.error("❌ 请安装 ffmpeg/ffprobe（pydub 和加速依赖）")
         return
 
     try:
@@ -227,7 +300,6 @@ def main():
         logger.error(f"路径映射错误: {e}")
         return
 
-    import time
     start_time = time.time()
     result = analyze_audio_files_parallel(str(base_path), str(base_dir),  args.max_workers, path_mappings)
     end_time = time.time()

@@ -2,8 +2,8 @@
 
 # 配置
 # audiobooks
-dataset_name="audiobooks/有声小说7"
-# dataset_name="podcasts/xiaoyuzhou"
+# dataset_name="audiobooks/有声小说1"
+dataset_name="podcasts/xiaoyuzhou"
 ROOT_DIR="/apdcephfs/tts_common/DATA/webdata"
 INPUT="${ROOT_DIR}/${dataset_name}"
 OUTPUT="${INPUT}/data_list.json"
