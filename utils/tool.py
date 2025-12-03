@@ -415,8 +415,10 @@ def calculate_audio_stats(data, metrics_filter_cfg):
 
     min_duration = metrics_filter_cfg.get("min_duration", 3)
     max_duration = metrics_filter_cfg.get("max_duration", 30)
-    min_dnsmos = metrics_filter_cfg.get("fixed_dnsmos_threshold", 3.0)
     min_char_count = metrics_filter_cfg.get("min_char_count", 2)
+    
+    lower_bound_percent = metrics_filter_cfg.get("lower_bound_percent", 10)
+    upper_bound_percent = metrics_filter_cfg.get("upper_bound_percent", 90)
 
     all_audio_stats = []
     valid_audio_stats = []
@@ -434,8 +436,8 @@ def calculate_audio_stats(data, metrics_filter_cfg):
 
     # calculate the bounds for the average character duration
     if len(avg_durations) > 0:
-        q1 = np.percentile(avg_durations, 25)
-        q3 = np.percentile(avg_durations, 75)
+        q1 = np.percentile(avg_durations, lower_bound_percent)
+        q3 = np.percentile(avg_durations, upper_bound_percent)
         iqr = q3 - q1
         lower_bound = q1 - 1.5 * iqr
         upper_bound = q3 + 1.5 * iqr
@@ -446,7 +448,6 @@ def calculate_audio_stats(data, metrics_filter_cfg):
     # iterate over each entry in the JSON to apply all filtering criteria
     for idx, entry in enumerate(data):
         duration = entry["end"] - entry["start"]
-        dnsmos = entry["dnsmos"]
         # remove punctuation and spaces
         char_count = get_char_count(entry["text"])
         if char_count > 0:
@@ -460,7 +461,6 @@ def calculate_audio_stats(data, metrics_filter_cfg):
         # apply filtering criteria
         if (
             (min_duration <= duration <= max_duration)  # withing duration range
-            and (dnsmos >= min_dnsmos)
             and (char_count >= min_char_count)
             and (
                 lower_bound <= avg_char_duration <= upper_bound

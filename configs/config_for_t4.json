@@ -90,6 +90,8 @@
         "fixed_snr_threshold": 30.0,
         "min_duration":2.0,
         "max_duration":30.0,
+        "lower_bound_percent": 10,
+        "upper_bound_percent": 90,
         "min_char_count": 2.0,
         "inter_similarity_threshold": 0.69,
         "intra_similarity_threshold": 0.63
