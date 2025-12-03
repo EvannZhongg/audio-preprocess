@@ -17,7 +17,8 @@ addict
 datasets
 einops
 scikit-learn
-
+# onnxruntime
+onnxruntime-gpu==1.19.0
 # ASR Models
 # openai-whisper
 # google-generativeai
