@@ -15,6 +15,7 @@ WORKDIR  /home/oicq/audio_preprocess
 
 RUN echo "source activate AudioPipeline" >> ~/.bashrc
 RUN conda run -n AudioPipeline pip install -r requirements.txt
+RUN conda run -n AudioPipeline pip uninstall onnxruntime -y
 RUN conda run -n AudioPipeline python main.py --prepare_env 1
 
 # ENTRYPOINT ["/bin/bash"]

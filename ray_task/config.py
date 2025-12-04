@@ -13,12 +13,11 @@
 
 # audiobooks/有声小说1
 DATASET_NAME = "audiobooks/有声小说1"
-# audiobooks/有声小说2
-DATASET_NAME = "audiobooks/有声小说2"
-
-
-
+# podcasts/xiaoyuzhou
+DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_ximalaya_audiobooks.json"
+
+
 PODCAST_PATH = "/cfs/cfs-czb184s7/DATA/webdata"
 OUTPUT_ROOT_DIR="/cfs/cfs-czb184s7/PROCESSED_DATA/webdata"
 OUTPUT_PATH = f"{OUTPUT_ROOT_DIR}/{DATASET_NAME}"

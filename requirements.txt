@@ -3,6 +3,9 @@ torch==2.5.0
 torchaudio==2.5.0
 torchvision==0.20.0
 
+# onnxruntime
+onnxruntime-gpu==1.19.2
+
 # Diarization & Speaker Verification
 # Using a specific version of pyannote.audio for stability.
 # This will pull pyannote.core, pyannote.pipeline, etc. as dependencies.
@@ -17,8 +20,6 @@ addict
 datasets
 einops
 scikit-learn
-# onnxruntime
-onnxruntime-gpu==1.19.0
 # ASR Models
 # openai-whisper
 # google-generativeai
