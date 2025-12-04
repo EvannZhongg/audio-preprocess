@@ -11,7 +11,7 @@ logger = PipelineParam.logger
 
 @time_logger
 def refine_vad_list_by_embedding(
-    vad_list, audio, refinement_model, similarity_threshold, feature_extractor, device
+    vad_list, audio, refinement_model, similarity_threshold, refinement_batch_size, feature_extractor, device
 ):
     """
     Args:
@@ -31,7 +31,7 @@ def refine_vad_list_by_embedding(
     WINDOW_SIZE_S = 1.1
     WINDOW_STEP_S = 0.4
     SIMILARITY_THRESHOLD = similarity_threshold
-    MAX_REFINEMENT_BATCH_SIZE = 64 
+    MAX_REFINEMENT_BATCH_SIZE = refinement_batch_size
 
     def _get_embedding_single(waveform_segment):
         if len(waveform_segment) / audio["sample_rate"] < 0.1:

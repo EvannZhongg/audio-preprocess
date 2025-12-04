@@ -84,6 +84,7 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         paraformer_model_dir_cache = cfg["paraformer"].get("model_dir_cache", "iic/paraformer-zh")
         vad_model_dir_cache = cfg["paraformer"].get("vad_model_dir_cache", "iic/fsmn-vad")
         punc_model_dir_cache = cfg["paraformer"].get("punc_model_dir_cache", "iic/ct-punc-c")
+        batch_size = cfg["paraformer"].get("batch_size", 64)
 
         if paraformer_model_dir_cache and os.path.exists(paraformer_model_dir_cache):
             paraformer_model_dir = paraformer_model_dir_cache
@@ -100,7 +101,7 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         else:
             punc_model_dir = punc_model
 
-        asr_model = funasr_asr.load_asr_model(asr_model="ParaFormer", model_dir=paraformer_model_dir, vad_model_dir=vad_model_dir,  punc_model_dir=punc_model_dir, device=device_name)
+        asr_model = funasr_asr.load_asr_model(asr_model="ParaFormer", model_dir=paraformer_model_dir, vad_model_dir=vad_model_dir,  punc_model_dir=punc_model_dir, batch_size=batch_size, device=device_name)
 
     elif asr_provider == "whisper":
         if "whisper" not in cfg:

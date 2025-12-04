@@ -30,7 +30,8 @@
         "vad_model": "fsmn-vad",
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
+        "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "batch_size": 64
     },
     "whisper":{
         "model": "openai/whisper-large-v3-turbo",
@@ -94,7 +95,8 @@
         "upper_bound_percent": 90,
         "min_char_count": 2.0,
         "inter_similarity_threshold": 0.69,
-        "intra_similarity_threshold": 0.63
+        "intra_similarity_threshold": 0.63,
+        "refinement_batch_size": 128
     },
     "metrics": {
         "dnsmos":{

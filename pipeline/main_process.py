@@ -80,7 +80,7 @@ def main_process(manifest_entry, output_folder, report_path):
     
     meta_info.update_origin(raw_audio_path=audio_path)
     meta_info.update_origin(sample_rate=audio['sample_rate'])
-    meta_info.update_origin(duration=audio['duation'])
+    meta_info.update_origin(duration=round(audio['duation'], 4))
 
     logger.info("Step 1: Source Separation")
     # Add a check in config to decide whether to run this step
@@ -110,7 +110,8 @@ def main_process(manifest_entry, output_folder, report_path):
     if cfg.get("embedding_refinement", {}).get("enable", True) and refinement_model:
         logger.info("Step 3.5: Refining VAD list by speaker embedding for internal consistency.")
         inter_similarity_threshold = cfg.get("strategy_parameters", {}).get("inter_similarity_threshold", 0.7)
-        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_feature_extractor, device)
+        refinement_batch_size = cfg.get("strategy_parameters", {}).get("refinement_batch_size", 64)
+        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_batch_size, refinement_feature_extractor, device)
         update_stats(processing_stats, 'embedding_refinement', vad_list_initial, vad_list_refined)
     else:
         vad_list_refined = vad_list_initial

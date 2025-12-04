@@ -369,9 +369,9 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
             "speaker_min_similarity": f'{segment.get("min_similarity", 0.61):.4f}',
             "language": segment.get('language', 'zh'),
             "time_range": {
-                "duration": segment.get("duration", 0.0),
-                "start": segment.get("start", 0.0),
-                "end": segment.get("end", 0.0),
+                "duration": round(segment.get("end", 0.0) - segment.get("start", 0.0), 5),
+                "start": round(segment.get("start", 0.0), 5),
+                "end": round(segment.get("end", 0.0), 5),
             },
             "transcription_info": {
                 "text": segment.get("text", ""),
