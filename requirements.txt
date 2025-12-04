@@ -3,8 +3,6 @@ torch==2.5.0
 torchaudio==2.5.0
 torchvision==0.20.0
 
-# onnxruntime
-onnxruntime-gpu==1.19.2
 
 # Diarization & Speaker Verification
 # Using a specific version of pyannote.audio for stability.
@@ -50,3 +48,6 @@ filelock
 silero-vad
 mutagen
 ray==2.48.0
+
+# onnxruntime
+onnxruntime-gpu==1.19.2
