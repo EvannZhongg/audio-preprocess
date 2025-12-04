@@ -48,6 +48,3 @@ filelock
 silero-vad
 mutagen
 ray==2.48.0
-
-# onnxruntime
-onnxruntime-gpu==1.19.2
