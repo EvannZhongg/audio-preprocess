@@ -80,7 +80,7 @@ def main_process(manifest_entry, output_folder, report_path):
     
     meta_info.update_origin(raw_audio_path=audio_path)
     meta_info.update_origin(sample_rate=audio['sample_rate'])
-    meta_info.update_origin(duration=round(audio['duation'], 4))
+    meta_info.update_origin(duration=round(audio['duration'], 4))
 
     logger.info("Step 1: Source Separation")
     # Add a check in config to decide whether to run this step
