@@ -21,6 +21,7 @@
 
 DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_v100.json"
+BATCH_SIZE = 8
 CPU_PER_TASK_GPU = 5 
 GPU_PER_TASK = 0.5  
 CPU_PER_TASK_CPU = 4 
