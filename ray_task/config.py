@@ -12,19 +12,25 @@
 
 
 # audiobooks/有声小说1
-DATASET_NAME = "audiobooks/有声小说1"
-# podcasts/xiaoyuzhou
+# DATASET_NAME = "audiobooks/有声小说1"
+
 DATASET_NAME = "podcasts/xiaoyuzhou"
-CONFIG_PATH = "./configs/config_for_ximalaya_audiobooks.json"
+CONFIG_PATH = "./configs/config_for_v100.json"
+CPU_PER_TASK_GPU = 5  
+GPU_PER_TASK = 0.5   
+CPU_PER_TASK_CPU = 4  
+
+
+
+
+
+
 
 
 PODCAST_PATH = "/cfs/cfs-czb184s7/DATA/webdata"
 OUTPUT_ROOT_DIR="/cfs/cfs-czb184s7/PROCESSED_DATA/webdata"
 OUTPUT_PATH = f"{OUTPUT_ROOT_DIR}/{DATASET_NAME}"
 PODCAST_DATA_FILE = f"{PODCAST_PATH}/{DATASET_NAME}/data_list.json"
-
-
-
 
 
 TASK_RESULT_FILE = f"{OUTPUT_PATH}/ray_task_result.json"

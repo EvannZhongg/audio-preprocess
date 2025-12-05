@@ -12,7 +12,8 @@ from utils.logger import Logger
 
 logger = Logger.get_logger(f"ray-task")
 
-from ray_task.config import (CONFIG_PATH, DATASET_NAME, OUTPUT_PATH,
+from ray_task.config import (CONFIG_PATH, CPU_PER_TASK_CPU, CPU_PER_TASK_GPU,
+                             DATASET_NAME, GPU_PER_TASK, OUTPUT_PATH,
                              OUTPUT_ROOT_DIR, PODCAST_PATH,
                              TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
@@ -20,6 +21,10 @@ from ray_task.podcast_sort import sort_podcast_todo_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
 ray.init(ignore_reinit_error=True)
+
+# CPU_PER_TASK_GPU = 5  # 每个 GPU 任务占用 5 个 CPU (11 CPU / 2 任务 ≈ 5)
+# GPU_PER_TASK = 0.5    # 每个 GPU 任务占用 0.5 个 GPU
+# CPU_PER_TASK_CPU = 4  # 如果只跑 CPU 任务，保持原有的 4 个 CPU 占用
 
 def get_ray_total_cpu():
     nodes = ray.nodes()
@@ -56,6 +61,7 @@ def handle_task(config_path, task, prefix_path, output_path):
         input_audio_path = task["audio_path"]
 
         task_key = get_task_key(task)
+        # 实际运行音频预处理管线
         ret = run_audio_preprocess_pipeline(config_path, input_audio_path, prefix_path, output_path)
         # logger.debug(f"handle task={task} ret={ret}")
         return ret, task
@@ -63,19 +69,20 @@ def handle_task(config_path, task, prefix_path, output_path):
         logger.error(f"handle task={task} error {traceback.format_exc()}")
         return "EXCEPTION", task
 
-@ray.remote(num_cpus=4, max_retries=0)
+# CPU 任务：保持原有的 4 CPU 占用
+@ray.remote(num_cpus=CPU_PER_TASK_CPU, max_retries=0)
 def handle_task_ray_cpu(config_path, task, audio_prefix_path, output_path):
     return handle_task(config_path, task, audio_prefix_path, output_path)
 
-# 目前gpu用的T4，一卡一任务
-@ray.remote(num_cpus=4, num_gpus=1, max_retries=0)
+# GPU 任务：每个任务占用 5 CPU 和 0.5 GPU，实现一卡双任务
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, max_retries=0)
 def handle_task_ray_gpu(config_path, task, audio_prefix_path, output_path):
     return handle_task(config_path, task, audio_prefix_path, output_path)
 
 def get_optimal_task_function():
     """根据可用资源返回最优的任务函数"""
     available_gpus = get_ray_available_gpu()
-    if available_gpus >= 0.5:
+    if available_gpus >= GPU_PER_TASK: # 确保至少有 0.5 个 GPU 可用
         return handle_task_ray_gpu
     else:
         return handle_task_ray_cpu
@@ -113,7 +120,29 @@ def run():
 
         need_delete_task_key = []
 
-        # logger.debug(f"all tasks {tasks}")
+        # 计算最大并发任务数
+        optimal_task_func = get_optimal_task_function()
+        
+        if optimal_task_func == handle_task_ray_gpu:
+            # 如果使用 GPU 任务 (0.5 GPU)，则并发数由可用 GPU 资源决定
+            available_gpus = get_ray_available_gpu()
+            MAX_NUM_PENDING_TASKS = int(available_gpus / GPU_PER_TASK)
+            if MAX_NUM_PENDING_TASKS == 0 and available_gpus >= 0.1:
+                # 浮点数误差处理，至少允许运行一个
+                 MAX_NUM_PENDING_TASKS = 1
+            if MAX_NUM_PENDING_TASKS == 0:
+                 # 如果 GPU 资源不足，退回 CPU 任务的并发计算
+                 MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / CPU_PER_TASK_CPU)
+        else:
+            # 如果使用 CPU 任务 (4 CPU)，则并发数由总 CPU 资源决定
+            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / CPU_PER_TASK_CPU)
+            
+        # 确保并发数至少为 1
+        if MAX_NUM_PENDING_TASKS == 0:
+            MAX_NUM_PENDING_TASKS = 1
+        
+        logger.debug(f"Current optimal_task_func={optimal_task_func.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
+
 
         for task in tasks['todo']:
             # save processing data
@@ -129,15 +158,15 @@ def run():
             # check_dirty_data(task)
 
             # handle ray task
-            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4)
             if len(result_refs) < MAX_NUM_PENDING_TASKS:
-                logger.debug(f"append task={task} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
+                logger.debug(f"append task={task}")
 
                 tasks["processing"][task_key] = task
                 save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
 
-                optimal_task_func = get_optimal_task_function()
-                result_ref = optimal_task_func.remote(CONFIG_PATH, task, PODCAST_PATH, OUTPUT_ROOT_DIR)
+                # 在循环内部重新获取一次，防止在等待过程中资源发生变化
+                current_optimal_task_func = get_optimal_task_function()
+                result_ref = current_optimal_task_func.remote(CONFIG_PATH, task, PODCAST_PATH, OUTPUT_ROOT_DIR)
                 result_refs.append(result_ref)
                 result_ref_map[result_ref] = task
             else:
