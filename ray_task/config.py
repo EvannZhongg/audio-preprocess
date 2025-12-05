@@ -10,15 +10,20 @@
 # TASK_RESULT_BACKUP_FILE = f"{OUTPUT_PATH}/ray_task_result_backup.json"
 # REPORT_PATH = f"{OUTPUT_PATH}/processing_report.csv"
 
+# T4: 16G, 4cpu, P40: 24G, 12cpu, A10: 24G, 12cpu, V100: 32, 11cpu
 
 # audiobooks/有声小说1
 # DATASET_NAME = "audiobooks/有声小说1"
+# CONFIG_PATH = "./configs/config_for_a10.json" 
+# CPU_PER_TASK_GPU = 5 
+# GPU_PER_TASK = 0.5    
+# CPU_PER_TASK_CPU = 4  
 
 DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_v100.json"
-CPU_PER_TASK_GPU = 5  # 每个 GPU 任务占用 5 个 CPU (11 CPU / 2 任务 ≈ 5)
-GPU_PER_TASK = 0.5    # 每个 GPU 任务占用 0.5 个 GPU
-CPU_PER_TASK_CPU = 4  # 如果只跑 CPU 任务，保持原有的 4 个 CPU 占用
+CPU_PER_TASK_GPU = 5 
+GPU_PER_TASK = 0.5  
+CPU_PER_TASK_CPU = 4 
 
 
 

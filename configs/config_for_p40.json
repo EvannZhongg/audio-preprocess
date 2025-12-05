@@ -78,7 +78,7 @@
             "chunk_size": 8,
             "valid_size": 8,
             "overlap": 1,
-            "batch_size": 12
+            "batch_size": 6
         }
     },
     "strategy_parameters": {
@@ -96,7 +96,7 @@
         "min_char_count": 2.0,
         "inter_similarity_threshold": 0.69,
         "intra_similarity_threshold": 0.63,
-        "refinement_batch_size": 128
+        "refinement_batch_size": 32
     },
     "metrics": {
         "dnsmos":{

@@ -96,7 +96,7 @@
         "min_char_count": 2.0,
         "inter_similarity_threshold": 0.69,
         "intra_similarity_threshold": 0.63,
-        "refinement_batch_size": 128
+        "refinement_batch_size": 64
     },
     "metrics": {
         "dnsmos":{
