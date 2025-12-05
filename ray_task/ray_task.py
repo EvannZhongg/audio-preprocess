@@ -22,9 +22,6 @@ from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
 ray.init(ignore_reinit_error=True)
 
-# CPU_PER_TASK_GPU = 5  # 每个 GPU 任务占用 5 个 CPU (11 CPU / 2 任务 ≈ 5)
-# GPU_PER_TASK = 0.5    # 每个 GPU 任务占用 0.5 个 GPU
-# CPU_PER_TASK_CPU = 4  # 如果只跑 CPU 任务，保持原有的 4 个 CPU 占用
 
 def get_ray_total_cpu():
     nodes = ray.nodes()
