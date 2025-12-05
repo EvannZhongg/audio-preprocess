@@ -15,7 +15,7 @@ WORKDIR  /home/oicq/audio_preprocess
 
 RUN echo "source activate AudioPipeline" >> ~/.bashrc
 RUN conda run -n AudioPipeline pip install -r requirements.txt
-RUN conda run -n AudioPipeline pip install onnxruntime-gpu=1.19.2 -y
+RUN conda run -n AudioPipeline pip install onnxruntime-gpu==1.19.2
 RUN conda run -n AudioPipeline python main.py --prepare_env 1
 
 # ENTRYPOINT ["/bin/bash"]
