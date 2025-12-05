@@ -16,9 +16,9 @@
 
 DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_v100.json"
-# CPU_PER_TASK_GPU = 5  # 每个 GPU 任务占用 5 个 CPU (11 CPU / 2 任务 ≈ 5)
-# GPU_PER_TASK = 0.5    # 每个 GPU 任务占用 0.5 个 GPU
-# CPU_PER_TASK_CPU = 4  # 如果只跑 CPU 任务，保持原有的 4 个 CPU 占用
+CPU_PER_TASK_GPU = 5  # 每个 GPU 任务占用 5 个 CPU (11 CPU / 2 任务 ≈ 5)
+GPU_PER_TASK = 0.5    # 每个 GPU 任务占用 0.5 个 GPU
+CPU_PER_TASK_CPU = 4  # 如果只跑 CPU 任务，保持原有的 4 个 CPU 占用
 
 
 
