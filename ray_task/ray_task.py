@@ -138,8 +138,8 @@ def run():
         if MAX_NUM_PENDING_TASKS == 0:
             MAX_NUM_PENDING_TASKS = 1
         
-        logger.debug(f"Current optimal_task_func={optimal_task_func.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
-
+        # logger.debug(f"Current optimal_task_func={optimal_task_func.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
+        logger.debug(f"Current optimal_task_func={optimal_task_func._function.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
 
         for task in tasks['todo']:
             # save processing data
