@@ -13,10 +13,11 @@ from pipeline.speaker_diarization import speaker_diarization
 from pipeline.standardization import standardization
 from pipeline.vad_process import (cut_by_speaker_label,
                                   refine_vad_list_by_embedding)
+from utils.logger import Logger
 from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 def file_is_large(audio_path):
     try:
