@@ -5,7 +5,9 @@ import librosa
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 from pipeline.global_var import PipelineParam
-from utils.logger import time_logger
+from utils.logger import Logger
+
+logger = Logger.get_logger(__name__)
 
 
 def normalize_text(text):

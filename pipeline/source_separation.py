@@ -1,10 +1,10 @@
 import librosa
 
-from utils.logger import time_logger
 from models import smru_separate
 from pipeline.global_var import PipelineParam
+from utils.logger import Logger, time_logger
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 
 @time_logger

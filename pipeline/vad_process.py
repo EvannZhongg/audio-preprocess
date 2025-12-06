@@ -5,9 +5,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from torch.nn.utils.rnn import pad_sequence
 
 from pipeline.global_var import PipelineParam
-from utils.logger import time_logger
+from utils.logger import Logger, time_logger
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 @time_logger
 def refine_vad_list_by_embedding(

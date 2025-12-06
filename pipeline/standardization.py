@@ -5,9 +5,9 @@ import numpy as np
 from pydub import AudioSegment
 
 from pipeline.global_var import PipelineParam
-from utils.logger import time_logger
+from utils.logger import Logger, time_logger
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 audio_count = 0
 

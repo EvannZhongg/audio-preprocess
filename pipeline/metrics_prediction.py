@@ -3,10 +3,10 @@ import numpy as np
 import tqdm
 
 from pipeline.global_var import PipelineParam
-from utils.logger import time_logger
+from utils.logger import Logger, time_logger
 from utils.tool import calculate_audio_stats
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 @time_logger
 def metrics_prediction(audio, vad_list, metrics_filter_cfg):

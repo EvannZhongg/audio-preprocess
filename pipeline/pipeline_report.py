@@ -2,8 +2,9 @@ import csv
 import os
 
 from pipeline.global_var import PipelineParam
+from utils.logger import Logger
 
-logger = PipelineParam.logger
+logger = Logger.get_logger(__name__)
 
 
 def append_to_report(report_path, rel_path, file_path, initial_duration, final_duration):
