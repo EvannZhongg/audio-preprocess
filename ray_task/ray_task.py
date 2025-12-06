@@ -27,7 +27,7 @@ assert GPU_PER_TASK > 0, "GPU_PER_TASK must be > 0 for GPU-only mode"
 # --- Global Settings ---
 # ------------------------------------------------------------------
 
-SAVE_INTERVAL_SECONDS = 60 * 60  # 1小时
+SAVE_INTERVAL_SECONDS = 3 * 60 * 60  # 3小时
 
 # ------------------------------------------------------------------
 # --- Utilities ---
@@ -40,15 +40,22 @@ def get_ray_available_resources():
     return available_cpus, available_gpus
 
     
-def save_tasks(tasks, file_path):
+def save_tasks(tasks, main_file_path, backup_file_path=None):
+    """
+    Save task state to main file, and optionally to a backup file.
+    """
+    # 清理 todo 列表中的非 dict 项（防御性编程）
     if 'todo' in tasks and isinstance(tasks['todo'], list):
-        tasks['todo'] = [
-            item for item in tasks['todo']
-            if isinstance(item, dict)
-        ]
-    
-    with open(file_path, 'w', encoding='utf-8') as f:
+        tasks['todo'] = [item for item in tasks['todo'] if isinstance(item, dict)]
+
+    # 保存主文件
+    with open(main_file_path, 'w', encoding='utf-8') as f:
         json.dump(tasks, f, indent=2)
+
+    # 如果指定了备份路径，复制一份
+    if backup_file_path:
+        shutil.copy(main_file_path, backup_file_path)
+        
 
 def get_task_key(task):
     return task["relative_path"]
@@ -230,7 +237,7 @@ def run():
         current_time = time.time()
         if current_time - last_save_time >= SAVE_INTERVAL_SECONDS:
             logger.debug("Saving tasks state (GPU-only mode)")
-            save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
+            save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
             last_save_time = current_time
 
 def main():
