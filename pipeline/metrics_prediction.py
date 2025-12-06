@@ -2,11 +2,9 @@ import librosa
 import numpy as np
 import tqdm
 
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger, time_logger
+from utils.logger import time_logger
 from utils.tool import calculate_audio_stats
 
-logger = Logger.get_logger(__name__)
 
 @time_logger
 def metrics_prediction(audio, vad_list, metrics_filter_cfg):
@@ -21,6 +19,10 @@ def metrics_prediction(audio, vad_list, metrics_filter_cfg):
     Returns:
         tuple: A tuple containing the average audio quality scores and the updated VAD segments with audio quality scores.
     """
+    
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
+    
     cfg = PipelineParam.cfg
     dnsmos_compute_score = PipelineParam.dnsmos_compute_score
     brouhaha_metric = PipelineParam.brouhaha_metric
@@ -65,6 +67,8 @@ def filter_by_metrics(metrics_list, metrics_filter_cfg):
     Returns:
         list: A list of VAD segments that passed all filtering stages.
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
     # 检查输入是否为空
     if not metrics_list:
         logger.warning("No segments to filter - metrics_list is empty")

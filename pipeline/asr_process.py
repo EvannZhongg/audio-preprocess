@@ -4,10 +4,7 @@ import jiwer
 import librosa
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger
-
-logger = Logger.get_logger(__name__)
+from utils.logger import time_logger
 
 
 def normalize_text(text):
@@ -29,6 +26,8 @@ def asr(vad_segments, audio):
     Returns:
         list: A list of ASR results with transcriptions and language details.
     """
+    from pipeline.global_var import PipelineParam
+
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg
     asr_model = PipelineParam.asr_model

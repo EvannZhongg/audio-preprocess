@@ -127,12 +127,21 @@ def init_pipeline_global(config, cli_args):
     - Sets up logger and device (GPU).
     - Loads all models into global variables for this process.
     """
-    from multiprocessing.process import current_process
-    worker_id_str = current_process().name
-    if worker_id_str == "MainProcess":
-        worker_id = 0
+    # from multiprocessing.process import current_process
+    # worker_id_str = current_process().name
+    # if worker_id_str == "MainProcess":
+    #     worker_id = 0
+    # else:
+    #     worker_id = int(worker_id_str.split('-')[-1]) - 1
+    if torch.cuda.is_available():
+        try:
+            gpu_id = torch.cuda.current_device()
+            worker_id = f"gpu{gpu_id}"
+        except:
+            worker_id = str(uuid.uuid4())[:6]
     else:
-        worker_id = int(worker_id_str.split('-')[-1]) - 1
+        worker_id = "cpu"
+
 
     # 1. Setup globals
     g_args = cli_args
@@ -163,7 +172,8 @@ def init_pipeline_global(config, cli_args):
              raise RuntimeError("No GPUs available for processing.")
 
         # Assign worker to an available GPU
-        gpu_id = available_gpus[worker_id % len(available_gpus)]
+        # gpu_id = available_gpus[worker_id % len(available_gpus)]
+        gpu_id = 0
         
         logger.info(f"Worker {worker_id} using GPU {gpu_id} (from available list: {available_gpus})")
         device_name = f"cuda:{gpu_id}"

@@ -1,11 +1,6 @@
 import csv
 import os
 
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger
-
-logger = Logger.get_logger(__name__)
-
 
 def append_to_report(report_path, rel_path, file_path, initial_duration, final_duration):
     """
@@ -51,6 +46,8 @@ def update_stats(stats, step_name, list_before, list_after):
 
 def print_processing_summary(stats, audio_name):
     """Prints a formatted summary of the audio processing statistics."""
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
     logger.info(f"--- Processing Summary for: {audio_name} ---")
 
     initial_count = stats['initial']['count']

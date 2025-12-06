@@ -5,12 +5,15 @@ import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
+import ray
+
 from pipeline import global_var
 from pipeline.main_process import main_process
+from ray_task.config import CPU_PER_TASK_GPU, GPU_PER_TASK
 from utils.logger import Logger
 from utils.tool import load_cfg
 
-logger = Logger.get_logger(f"ray-task")
+_pipeline_initialized = False
 
 
 def get_task_key(task):
@@ -29,17 +32,28 @@ class TaskCmdArgs:
     compute_type: str = 'float16'
     whisper_arch: str = 'medium'
     threads: int = 4
+    
+    
+def _ensure_pipeline_initialized(config_path):
+    global _pipeline_initialized
+    if not _pipeline_initialized:
+        try:
+            main_cfg = load_cfg(config_path)
+            cli_args = TaskCmdArgs(...)
+            global_var.init_pipeline_global(main_cfg, cli_args)
+            _pipeline_initialized = True
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize pipeline: {e}") from e
 
 
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, max_retries=0)
 def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_dir):
     try:
-        main_cfg = load_cfg(config_path)
-        cli_args = TaskCmdArgs(batch_size=8, compute_type='float16', threads=4)
-        logger.info(f"Pipeline config={main_cfg} cli_args={cli_args}")
-        global_var.init_pipeline_global(main_cfg, cli_args)
-    
+        _ensure_pipeline_initialized(config_path)
+        logger = global_var.PipelineParam.logger
+        logger.info(f"Processing batch on device: {global_var.PipelineParam.device}")
+        
         os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"Processed data will be saved in: {output_dir}")
         
     except Exception:
         logger.error(f"Global pipeline initialization failed: {traceback.format_exc()}")

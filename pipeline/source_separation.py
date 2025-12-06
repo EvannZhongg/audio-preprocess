@@ -1,10 +1,7 @@
 import librosa
 
 from models import smru_separate
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger, time_logger
-
-logger = Logger.get_logger(__name__)
+from utils.logger import time_logger
 
 
 @time_logger
@@ -19,6 +16,8 @@ def source_separation(predictor, audio):
     Returns:
         dict: A dictionary containing the separated vocals and updated audio waveform.
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
 
     mix, rate = None, None
 

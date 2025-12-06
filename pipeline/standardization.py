@@ -4,10 +4,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from pydub import AudioSegment
 
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger, time_logger
-
-logger = Logger.get_logger(__name__)
+from utils.logger import time_logger
 
 audio_count = 0
 
@@ -32,6 +29,9 @@ def standardize_chunk(audio_segment: AudioSegment, limited_gain: float, target_s
 
 @time_logger
 def standardization(audio, max_workers=4):
+    
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
 
     global audio_count
     

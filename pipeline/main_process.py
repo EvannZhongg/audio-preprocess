@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 from pipeline.asr_process import asr
-from pipeline.global_var import PipelineParam
 from pipeline.metrics_prediction import filter_by_metrics, metrics_prediction
 from pipeline.pipeline_report import (append_to_report,
                                       print_processing_summary, update_stats)
@@ -13,11 +12,9 @@ from pipeline.speaker_diarization import speaker_diarization
 from pipeline.standardization import standardization
 from pipeline.vad_process import (cut_by_speaker_label,
                                   refine_vad_list_by_embedding)
-from utils.logger import Logger
 from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
 
-logger = Logger.get_logger(__name__)
 
 def file_is_large(audio_path):
     try:
@@ -40,6 +37,10 @@ def main_process(manifest_entry, output_folder, report_path):
     """
     Process the audio file..
     """
+    
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
+    
     cfg = PipelineParam.cfg
     device = PipelineParam.device
     separate_predictor1 = PipelineParam.separate_predictor1

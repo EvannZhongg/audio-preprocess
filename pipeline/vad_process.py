@@ -4,10 +4,8 @@ import torch
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.nn.utils.rnn import pad_sequence
 
-from pipeline.global_var import PipelineParam
-from utils.logger import Logger, time_logger
+from utils.logger import time_logger
 
-logger = Logger.get_logger(__name__)
 
 @time_logger
 def refine_vad_list_by_embedding(
@@ -25,6 +23,8 @@ def refine_vad_list_by_embedding(
     Returns:
         list: 经过筛选后，逻辑与旧版本一致的VAD切片新列表。
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
 
     refined_vad_list = []
     MIN_SEGMENT_DURATION_S = 1.0
@@ -164,6 +164,9 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
     Returns:
         list: A list of updated VAD segments after merging and trimming.
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
+    
     MERGE_GAP = postprocess_cfg.get("merge_gap", 2)   # merge gap in seconds, if smaller than this, merge
     MIN_SEGMENT_LENGTH = postprocess_cfg.get("min_segment_length", 3)  # min segment length in seconds
     MAX_SEGMENT_LENGTH = postprocess_cfg.get("max_segment_length", 30)  # max segment length in seconds

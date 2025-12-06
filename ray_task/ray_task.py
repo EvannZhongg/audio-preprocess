@@ -22,7 +22,6 @@ from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
 assert GPU_PER_TASK > 0, "GPU_PER_TASK must be > 0 for GPU-only mode"
 
-ray.init(ignore_reinit_error=True)
 
 # ------------------------------------------------------------------
 # --- Global Settings ---
@@ -40,10 +39,6 @@ def get_ray_available_resources():
     available_gpus = available_resources.get('GPU', 0)
     return available_cpus, available_gpus
 
-def save_tasks(file_path, backup_file_path, data):
-    with open(backup_file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-    shutil.move(backup_file_path, file_path)
     
 def save_tasks(tasks, file_path):
     if 'todo' in tasks and isinstance(tasks['todo'], list):
@@ -239,6 +234,7 @@ def run():
             last_save_time = current_time
 
 def main():
+    ray.init(ignore_reinit_error=True)
     try:
         run()
     except Exception as e:
