@@ -9,7 +9,6 @@ import ray
 
 from pipeline import global_var
 from pipeline.main_process import main_process
-from ray_task.config import CPU_PER_TASK_GPU, GPU_PER_TASK
 from utils.logger import Logger
 from utils.tool import load_cfg
 
@@ -46,7 +45,6 @@ def _ensure_pipeline_initialized(config_path):
             raise RuntimeError(f"Failed to initialize pipeline: {e}") from e
 
 
-@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, max_retries=0)
 def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_dir):
     try:
         _ensure_pipeline_initialized(config_path)
