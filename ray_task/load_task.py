@@ -14,6 +14,17 @@ def load_tasks(file_path):
     if os.path.exists(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             tasks = json.load(f)
+    
+        if 'todo' in tasks and isinstance(tasks['todo'], list):
+            cleaned_todo = []
+            for item in tasks['todo']:
+                if isinstance(item, dict) and "relative_path" in item:
+                    cleaned_todo.append(item)
+                else:
+                    logger.warning(f"Invalid task in todo: {item}. Skipping.")
+            tasks['todo'] = cleaned_todo
+        else:
+            tasks['todo'] = [] 
 
     if not tasks:
         with open(PODCAST_DATA_FILE, 'r', encoding='utf-8') as f:
@@ -29,7 +40,6 @@ def load_tasks(file_path):
             tasks['total_num'] = len(tasks['todo'])
             tasks['total_hour'] = sum(ep['audio_duration_second'] for ep in tasks['todo']) / 3600
             tasks['processing'] = {}
-
             tasks['complete'] = []
             tasks['complete_num'] = 0
             tasks['complete_total_hour'] = 0

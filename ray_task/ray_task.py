@@ -44,6 +44,16 @@ def save_tasks(file_path, backup_file_path, data):
     with open(backup_file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
     shutil.move(backup_file_path, file_path)
+    
+def save_tasks(tasks, file_path):
+    if 'todo' in tasks and isinstance(tasks['todo'], list):
+        tasks['todo'] = [
+            item for item in tasks['todo']
+            if isinstance(item, dict)
+        ]
+    
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(tasks, f, indent=2)
 
 def get_task_key(task):
     return task["relative_path"]
