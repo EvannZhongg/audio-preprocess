@@ -15,14 +15,17 @@
 # audiobooks/有声小说1
 # DATASET_NAME = "audiobooks/有声小说1"
 # CONFIG_PATH = "./configs/config_for_a10.json" 
-# CPU_PER_TASK_GPU = 5 
+# MAX_POOL_SIZE = 55
+# BATCH_SIZE = 8
+# CPU_PER_TASK_GPU = 4
 # GPU_PER_TASK = 0.5    
 # CPU_PER_TASK_CPU = 4  
 
 DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_v100.json"
+MAX_POOL_SIZE = 55
 BATCH_SIZE = 8
-CPU_PER_TASK_GPU = 5 
+CPU_PER_TASK_GPU = 4
 GPU_PER_TASK = 0.5  
 CPU_PER_TASK_CPU = 4 
 

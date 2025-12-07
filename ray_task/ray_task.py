@@ -15,8 +15,9 @@ logger = Logger.get_logger(f"ray-task")
 
 from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_CPU,
                              CPU_PER_TASK_GPU, DATASET_NAME, GPU_PER_TASK,
-                             OUTPUT_PATH, OUTPUT_ROOT_DIR, PODCAST_PATH,
-                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
+                             MAX_POOL_SIZE, OUTPUT_PATH, OUTPUT_ROOT_DIR,
+                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
+                             TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
@@ -67,6 +68,19 @@ def get_task_key(task):
 def handle_task(config_path, task_batch, prefix_path, output_path):
     successful_tasks = []
     failed_tasks = []
+    
+    padding_tasks = [task for task in task_batch if task["relative_path"].startswith("padding_")]
+    if padding_tasks:
+        logger.debug(f"Processing padding tasks: {len(padding_tasks)}")
+        # 直接返回成功（填充任务不需要实际处理）
+        for task in padding_tasks:
+            task["pipeline_status"] = "SUCCESS"
+        # 从任务列表中移除填充任务
+        task_batch = [task for task in task_batch if not task["relative_path"].startswith("padding_")]
+    
+    # 如果没有实际任务，直接返回
+    if not task_batch:
+        return [], []
 
     try:
         batch_status = run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_path)
@@ -87,10 +101,13 @@ def handle_task(config_path, task_batch, prefix_path, output_path):
         else:
             logger.warning(f"Sub-task {get_task_key(task)} failed: {task_status}")
             failed_tasks.append(task)
+            
+    if padding_tasks:
+        successful_tasks.extend(padding_tasks)
 
     return successful_tasks, failed_tasks
 
-@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, max_retries=0)
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="STRICT_SPREAD", max_retries=0)
 def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path):
     return handle_task(config_path, task_batch, audio_prefix_path, output_path)
 
@@ -138,17 +155,39 @@ def run():
     os.makedirs(OUTPUT_PATH, exist_ok=True)
 
     tasks = load_tasks(TASK_RESULT_FILE)
+    
+    # MAX_POOL_SIZE = 60
+    
+    
+    def ensure_task_pool_size():
+        if len(tasks['todo']) < MAX_POOL_SIZE:
+            padding_tasks = []
+            num_padding = MAX_POOL_SIZE - len(tasks['todo'])
+            for i in range(num_padding):
+                # 创建填充任务（相对路径以padding_开头，避免被跳过）
+                padding_task = {
+                    "relative_path": f"padding_{i}",
+                    "audio_duration_second": 15,  # 15秒（避免被跳过条件）
+                    # 其他字段可以留空，因为填充任务会特殊处理
+                }
+                padding_tasks.append(padding_task)
+            
+            tasks['todo'].extend(padding_tasks)
+            logger.info(f"Added {num_padding} padding tasks to ensure GPU utilization (now: {len(tasks['todo'])})")
 
     result_refs = []
     result_ref_map = {}
     last_save_time = time.time()
 
     while tasks['todo'] or result_refs:
+        
+        ensure_task_pool_size()
+        
         optimal_task_func, MAX_NUM_PENDING_TASKS = get_optimal_task_strategy()
 
         logger.debug(f"GPU-only: using {optimal_task_func._function.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
 
-        while tasks['todo'] and len(result_refs) < MAX_NUM_PENDING_TASKS:
+        while tasks['todo'] and len(result_refs) < MAX_POOL_SIZE:
             task_batch = []
             i = 0
             while i < len(tasks['todo']):
