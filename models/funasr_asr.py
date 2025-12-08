@@ -1,9 +1,10 @@
+import gc
 import logging
 import os
 import re
 import shutil
 import tempfile
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import soundfile as sf
@@ -14,14 +15,12 @@ from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
 
-
 logger = logging.getLogger(__name__)
 
 class FunASR:
     """
-    ASR class using FunASR models (optimized version).
-    Fixed critical issues: punctuation model support, redundant methods, empty segment handling.
-    Now supports unified batch recognition for both SenseVoice and ParaFormer.
+    ASR class using FunASR models (Optimized for Memory Stability).
+    Fixed: GPU Memory Leak via manual GC and Mini-batching.
     """
 
     def __init__(self, asr_model: str, model_dir: str, vad_model_dir: str, device: str, punc_model_dir: str = 'ct-punc-c', **kwargs):
@@ -32,6 +31,7 @@ class FunASR:
 
         self.device = device
         self.asr_model = asr_model
+        self.inference_batch_size = kwargs.get("batch_size", 16) 
 
         with FileLock(lock_file):
             logger.debug(f"Acquired lock for FunASR model: {model_dir}")
@@ -46,7 +46,6 @@ class FunASR:
             elif asr_model == "ParaFormer":
                 self.model = pipeline(
                     task=Tasks.auto_speech_recognition,
-                    batch_size=kwargs.get("batch_size", 64),
                     model=model_dir,
                     punc_model=punc_model_dir, 
                     device=device,
@@ -56,98 +55,115 @@ class FunASR:
                 raise ValueError(f"Unsupported FunASR model: {asr_model}")
         logger.debug(f"Released lock for FunASR model: {model_dir}")
 
-        # Emoji removal regex (kept for text cleanup)
         self.emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-            "\u2600-\u26FF"  # miscellaneous symbols
-            "\u2700-\u27BF"  # dingbats
+            "\U0001F600-\U0001F64F"
+            "\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF"
+            "\U0001F1E0-\U0001F1FF"
+            "\u2600-\u26FF"
+            "\u2700-\u27BF"
             "]+",
             flags=re.UNICODE,
         )
 
+    def _clear_memory(self):
+        """强制清理显存和内存碎片"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
     def detect_language(self, audio: np.ndarray):
-        """API compatibility - no separate language detection needed."""
-        logger.debug("FunASR auto-detects language during transcription.")
         return None, 0.0
 
     def batch_recognize_via_tempfile(self, audio: np.ndarray, vad_segments: List[dict], sample_rate: int = 16000):
         """
-        Batch transcribe audio segments using temporary files.
+        Batch transcribe with explicit chunking and memory cleanup.
         """
         if not vad_segments:
             return [""] * len(vad_segments)
         
-        # 记录非空片段的原始索引，用于结果对齐
         non_empty_segment_indices = [] 
         input_file_paths = []
 
+        # 创建临时目录
         with tempfile.TemporaryDirectory() as temp_dir:
-            try:
-                # 1. 创建所有音频片段的临时文件
-                for idx, segment_info in enumerate(vad_segments):
-                    start_frame = int(segment_info["start"] * sample_rate)
-                    end_frame = int(segment_info["end"] * sample_rate)
-                    segment_audio = audio[start_frame:end_frame]
-                    
-                    if len(segment_audio) == 0:
-                        continue
+            for idx, segment_info in enumerate(vad_segments):
+                start_frame = int(segment_info["start"] * sample_rate)
+                end_frame = int(segment_info["end"] * sample_rate)
+                segment_audio = audio[start_frame:end_frame]
+                
+                if len(segment_audio) == 0:
+                    continue
+                        
+                temp_audio_file_path = os.path.join(temp_dir, f"{idx}.wav")
+                sf.write(temp_audio_file_path, segment_audio, sample_rate)
+                
+                non_empty_segment_indices.append(idx)
+                input_file_paths.append(temp_audio_file_path)
+
+            if not input_file_paths:
+                return [""] * len(vad_segments)
+
+            all_inference_results = []
+            batch_size = self.inference_batch_size
+            total_files = len(input_file_paths)
+            
+            for i in range(0, total_files, batch_size):
+                batch_paths = input_file_paths[i : i + batch_size]
+                batch_results_chunk = []
+                
+                try:
+                    with torch.no_grad():
+                        if self.asr_model == "ParaFormer":
+                            # 为当前 Batch 创建一个 scp 文件
+                            batch_scp_path = os.path.join(temp_dir, f"filelist_batch_{i}.scp")
+                            with open(batch_scp_path, 'w') as f:
+                                for path in batch_paths:
+                                    f.write(f"{path}\n")
                             
-                    # 使用索引作为文件名
-                    temp_audio_file_path = os.path.join(temp_dir, f"{idx}.wav")
-                    sf.write(temp_audio_file_path, segment_audio, sample_rate)
+                            # 调用推理
+                            res = self.model(input=batch_scp_path, batch_size=batch_size)
+                            batch_results_chunk = res if isinstance(res, list) else [res]
+                            
+                        elif self.asr_model == "SenseVoice":
+                            res = self.model.generate(
+                                input=batch_paths,
+                                language="auto",
+                                use_itn=True,
+                                batch_size_s=0, # Disable internal dynamic batching to control strictly
+                                batch_size=len(batch_paths)
+                            )
+                            batch_results_chunk = res if isinstance(res, list) else [res]
                     
-                    non_empty_segment_indices.append(idx)
-                    input_file_paths.append(temp_audio_file_path)
+                    all_inference_results.extend(batch_results_chunk)
 
-                if not input_file_paths:
-                    return [""] * len(vad_segments)
-
-                # 2. 根据模型类型执行批量识别
-                if self.asr_model == "ParaFormer":
-                    # ParaFormer (ModelScope pipeline) 需要 filelist.scp 文件
-                    temp_file_path = os.path.join(temp_dir, "filelist.scp")
-                    with open(temp_file_path, 'w') as f:
-                        for path in input_file_paths:
-                            f.write(f"{path}\n")
-                    result = self.model(input=temp_file_path)
+                except Exception as e:
+                    logger.error(f"Error during batch inference at index {i}: {e}")
+                    all_inference_results.extend([{"text": ""}] * len(batch_paths))
                 
-                elif self.asr_model == "SenseVoice":
-                    # SenseVoice (AutoModel) 可以直接传入文件路径列表
-                    result = self.model.generate(
-                        input=input_file_paths,
-                        language="auto",
-                        use_itn=True,
-                    )
-                else:
-                    raise ValueError(f"Unsupported FunASR model: {self.asr_model}")
+                finally:
+                    del batch_results_chunk
+                    if 'res' in locals(): del res
+                    self._clear_memory()
 
-                # 3. 后处理结果并与原始片段列表对齐
-                if isinstance(result, dict):
-                    result = [result] 
+            full_text_results = [""] * len(vad_segments)
+            limit = min(len(all_inference_results), len(non_empty_segment_indices))
+            
+            for i in range(limit):
+                res = all_inference_results[i]
+                original_idx = non_empty_segment_indices[i]
                 
-                full_text_results = [""] * len(vad_segments)
+                raw_text = ""
+                if isinstance(res, dict) and "text" in res:
+                    raw_text = res["text"]
+                elif isinstance(res, list) and len(res) > 0 and "text" in res[0]:
+                    raw_text = res[0]["text"]
                 
-                for res, original_idx in zip(result, non_empty_segment_indices):
-                    # 获取原始文本
-                    if isinstance(res, dict) and "text" in res:
-                        raw_text = res["text"]
-                    elif isinstance(res, list) and len(res) > 0 and "text" in res[0]:
-                         raw_text = res[0]["text"]
-                    else:
-                        raw_text = ""
+                processed_text = rich_transcription_postprocess(raw_text).strip()
+                full_text_results[original_idx] = processed_text
 
-                    # 应用 FunASR 的后处理
-                    processed_text = rich_transcription_postprocess(raw_text).strip()
-                    full_text_results[original_idx] = processed_text
-
-                return full_text_results
-
-            finally:
-                pass 
+            return full_text_results
 
     def transcribe(
         self,
@@ -156,20 +172,15 @@ class FunASR:
         print_progress: bool = False,
         **kwargs
     ) -> dict:
-        """
-        Transcribe audio segments with optimized handling using unified batch processing.
-        Returns: {"segments": [{"text": "...", "start": 0.0, "end": 1.5, ...}]}
-        """
         if not vad_segments: 
             return {"segments": [], "language": "unknown"}
         
+        self._clear_memory()
         batch_result = self.batch_recognize_via_tempfile(audio, vad_segments)
         
         segments = []
         for res, segment_info in zip(batch_result, vad_segments):
             text = self.emoji_pattern.sub(r"", res).strip()
-            
-            # 仅记录非空文本的片段，或者保留所有片段 (取决于具体需求，此处保留所有片段信息)
             segments.append({
                 "text": text,
                 "start": round(segment_info["start"], 3),
@@ -177,27 +188,12 @@ class FunASR:
                 "speaker": segment_info.get("speaker", None),
             })
         
+        self._clear_memory()
+        
         return {"segments": segments, "language": "unknown"}
 
-
-def load_asr_model(
-    asr_model: str, 
-    model_dir: str, 
-    vad_model_dir: str, 
-    device: str, 
-    punc_model_dir: str = 'ct-punc-c', 
-    **kwargs
-):
-    """Factory function for FunASR model loading."""
-    return FunASR(
-        asr_model=asr_model, 
-        model_dir=model_dir, 
-        vad_model_dir=vad_model_dir,
-        punc_model_dir=punc_model_dir,
-        device=device,
-        **kwargs
-    )
-
+def load_asr_model(asr_model: str, model_dir: str, vad_model_dir: str, device: str, **kwargs):
+    return FunASR(asr_model, model_dir, vad_model_dir, device, **kwargs)
 
 def __repr__(self):
     return f"FunASR(model={self.asr_model}, device={self.device})"
