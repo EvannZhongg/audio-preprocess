@@ -1,18 +1,16 @@
 
 
 import os
+import threading
 import traceback
 from dataclasses import dataclass
-from pathlib import Path
-
-import ray
 
 from pipeline import global_var
 from pipeline.main_process import main_process
-from utils.logger import Logger
 from utils.tool import load_cfg
 
 _pipeline_initialized = False
+_init_lock = threading.Lock()
 
 
 def get_task_key(task):
@@ -35,43 +33,59 @@ class TaskCmdArgs:
     
 def _ensure_pipeline_initialized(config_path):
     global _pipeline_initialized
+
     if not _pipeline_initialized:
-        try:
-            main_cfg = load_cfg(config_path)
-            cli_args = TaskCmdArgs(...)
-            global_var.init_pipeline_global(main_cfg, cli_args)
-            _pipeline_initialized = True
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize pipeline: {e}") from e
+        with _init_lock:
+            if not _pipeline_initialized:
+                try:
+                    main_cfg = load_cfg(config_path)
+                    cli_args = TaskCmdArgs() 
+                    global_var.init_pipeline_global(main_cfg, cli_args)
+                    _pipeline_initialized = True
+                except Exception as e:
+                    raise RuntimeError(f"Failed to initialize pipeline: {e}") from e
 
 
 def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_dir):
     try:
         _ensure_pipeline_initialized(config_path)
-        logger = global_var.PipelineParam.logger
-        logger.info(f"Processing batch on device: {global_var.PipelineParam.device}")
-        
+
+        logger = getattr(global_var.PipelineParam, 'logger', None)
+        if logger is None:
+            import logging
+            logger = logging.getLogger("FallbackLogger")
+            
+        logger.info(f"Processing batch on device: {getattr(global_var.PipelineParam, 'device', 'unknown')}")
         os.makedirs(output_dir, exist_ok=True)
         
     except Exception:
-        logger.error(f"Global pipeline initialization failed: {traceback.format_exc()}")
+        print(f"CRITICAL: Global pipeline initialization failed:\n{traceback.format_exc()}")
         return "FAILURE_INIT"
 
 
     for task in task_batch:
-        input_audio_path = task["audio_path"]
+        input_audio_path = task.get("audio_path")
+        if not input_audio_path:
+            logger.warning(f"Skipping task with missing audio_path: {task}")
+            continue
+
         task_key = get_task_key(task)
 
         try:
             manifest_entry = get_audio_manifest(input_audio_path, prefix_path)
-            main_process(manifest_entry, output_dir, "processing_report.csv")
+            
+            report_file = "processing_report.csv" 
+            main_process(manifest_entry, output_dir, report_file)
             
             logger.info(f"Sub-task {task_key} processed successfully.")
-            task["pipeline_status"] = "SUCCESS" 
+            task["pipeline_status"] = "SUCCESS"
 
         except Exception as e:
-            logger.error(f"Error processing sub-task {task_key} in Batch: {traceback.format_exc()}")
-            task["pipeline_status"] = "FAILURE" 
+            error_msg = traceback.format_exc()
+            logger.error(f"Error processing sub-task {task_key} in Batch: {error_msg}")
+            
+            task["pipeline_status"] = "FAILURE"
+            task["error_msg"] = str(e) 
             
     logger.info("--- All sub-tasks in Batch have been processed. ---")
     return "SUCCESS"

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import sys
@@ -12,23 +13,18 @@ from utils.logger import Logger
 
 logger = Logger.get_logger(f"ray-task")
 
-
-from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_CPU,
-                             CPU_PER_TASK_GPU, DATASET_NAME, GPU_PER_TASK,
-                             MAX_POOL_SIZE, OUTPUT_PATH, OUTPUT_ROOT_DIR,
-                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
-                             TASK_RESULT_FILE)
+from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_GPU,
+                             DATASET_NAME, GPU_PER_TASK, MAX_POOL_SIZE,
+                             OUTPUT_PATH, OUTPUT_ROOT_DIR, PODCAST_PATH,
+                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
-
-assert GPU_PER_TASK > 0, "GPU_PER_TASK must be > 0 for GPU-only mode"
-
 
 # ------------------------------------------------------------------
 # --- Global Settings ---
 # ------------------------------------------------------------------
 
-SAVE_INTERVAL_SECONDS = 3 * 60 * 60  # 3小时
+SAVE_INTERVAL_SECONDS = 3 * 3600
 
 # ------------------------------------------------------------------
 # --- Utilities ---
@@ -40,61 +36,50 @@ def get_ray_available_resources():
     available_gpus = available_resources.get('GPU', 0)
     return available_cpus, available_gpus
 
-    
 def save_tasks(tasks, main_file_path, backup_file_path=None):
-    """
-    Save task state to main file, and optionally to a backup file.
-    """
-    # 清理 todo 列表中的非 dict 项（防御性编程）
     if 'todo' in tasks and isinstance(tasks['todo'], list):
         tasks['todo'] = [item for item in tasks['todo'] if isinstance(item, dict)]
 
-    # 保存主文件
-    with open(main_file_path, 'w', encoding='utf-8') as f:
-        json.dump(tasks, f, indent=2)
-
-    # 如果指定了备份路径，复制一份
+    temp_file = main_file_path + ".tmp"
+    with open(temp_file, 'w', encoding='utf-8') as f:
+        json.dump(tasks, f, indent=2, ensure_ascii=False) 
+        
+    shutil.move(temp_file, main_file_path)
     if backup_file_path:
         shutil.copy(main_file_path, backup_file_path)
-        
 
 def get_task_key(task):
     return task["relative_path"]
 
 # ------------------------------------------------------------------
-# --- Task Handling Logic (GPU-only) ---
+# --- Task Handling Logic ---
 # ------------------------------------------------------------------
 
 def handle_task(config_path, task_batch, prefix_path, output_path):
     successful_tasks = []
     failed_tasks = []
     
-    padding_tasks = [task for task in task_batch if task["relative_path"].startswith("padding_")]
-    if padding_tasks:
-        logger.debug(f"Processing padding tasks: {len(padding_tasks)}")
-        # 直接返回成功（填充任务不需要实际处理）
-        for task in padding_tasks:
-            task["pipeline_status"] = "SUCCESS"
-        # 从任务列表中移除填充任务
-        task_batch = [task for task in task_batch if not task["relative_path"].startswith("padding_")]
-    
-    # 如果没有实际任务，直接返回
-    if not task_batch:
-        return [], []
+    padding_tasks = [task for task in task_batch if str(task.get("relative_path", "")).startswith("padding_")]
+    real_tasks = [task for task in task_batch if not str(task.get("relative_path", "")).startswith("padding_")]
+
+    for task in padding_tasks:
+        task["pipeline_status"] = "SUCCESS"
+
+    if not real_tasks:
+        return padding_tasks, []
 
     try:
-        batch_status = run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_path)
+        batch_status = run_audio_preprocess_pipeline(config_path, real_tasks, prefix_path, output_path)
         if batch_status != "SUCCESS":
             logger.error(f"Batch task failed with status: {batch_status}")
-            failed_tasks = task_batch  # 所有任务失败
-            return successful_tasks, failed_tasks
+            return successful_tasks, task_batch # 全部标记失败
 
     except Exception as e:
         logger.error(f"handle Batch task error {traceback.format_exc()}")
-        failed_tasks = task_batch  # 所有任务失败
-        return successful_tasks, failed_tasks
+        return successful_tasks, task_batch
 
-    for task in task_batch:
+
+    for task in real_tasks:
         task_status = task.get("pipeline_status", "UNKNOWN")
         if task_status == "SUCCESS":
             successful_tasks.append(task)
@@ -102,51 +87,40 @@ def handle_task(config_path, task_batch, prefix_path, output_path):
             logger.warning(f"Sub-task {get_task_key(task)} failed: {task_status}")
             failed_tasks.append(task)
             
-    if padding_tasks:
-        successful_tasks.extend(padding_tasks)
+    successful_tasks.extend(padding_tasks)
 
     return successful_tasks, failed_tasks
 
-@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="STRICT_SPREAD", max_retries=0)
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="SPREAD", max_retries=0)
 def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path):
     return handle_task(config_path, task_batch, audio_prefix_path, output_path)
 
 # ------------------------------------------------------------------
-# --- Scheduling Policy (GPU-only) ---
+# --- Main Run Loop ---
 # ------------------------------------------------------------------
 
-def get_optimal_task_strategy():
-    available_cpus, available_gpus = get_ray_available_resources()
+last_send_bot_msg = 0
 
-    if available_gpus < GPU_PER_TASK:
-        logger.debug(f"Insufficient GPU resources (need {GPU_PER_TASK}, available: {available_gpus}). Waiting...")
-        return handle_task_ray_gpu, 0
-
-    max_gpu_tasks = available_gpus // GPU_PER_TASK
-    max_cpu_tasks = available_cpus // CPU_PER_TASK_GPU
-    MAX_NUM_PENDING_TASKS = min(max_gpu_tasks, max_cpu_tasks)
-    
-    if MAX_NUM_PENDING_TASKS == 0:
-        logger.debug("Insufficient CPU resources for GPU tasks. Waiting...")
-        return handle_task_ray_gpu, 0
-
-    return handle_task_ray_gpu, MAX_NUM_PENDING_TASKS
-
-last_send_bot_msg = time.time()
 def print_progress(tasks):
     global last_send_bot_msg
-    total_hour = tasks["total_hour"]
-    handled_hour = tasks["complete_total_hour"]
-    log_str = f"{DATASET_NAME}: audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
-    logger.debug(log_str)
+    total_hour = tasks.get("total_hour", 0)
+    handled_hour = tasks.get("complete_total_hour", 0)
+    failed_hour = tasks.get("failed_total_hour", 0)
     
-    if time.time() - last_send_bot_msg > 3 * 3600:  # 3小时
+    if total_hour > 0:
+        percent = (handled_hour / total_hour) * 100
+    else:
+        percent = 0
+
+    log_str = (f"{DATASET_NAME}: Progress {percent:.2f}% | "
+               f"Done: {round(handled_hour, 2)}h | Failed: {round(failed_hour, 2)}h | "
+               f"Pending Batch: {len(tasks['todo']) // BATCH_SIZE}")
+    
+    logger.debug(log_str)
+    if time.time() - last_send_bot_msg > 3 * 3600: 
         last_send_bot_msg = time.time()
         msg_bot.send_msg(log_str)
 
-# ------------------------------------------------------------------
-# --- Main Run Loop (GPU-only) ---
-# ------------------------------------------------------------------
 
 def run():
     if os.path.exists(OUTPUT_PATH) and os.listdir(OUTPUT_PATH):
@@ -156,131 +130,124 @@ def run():
 
     tasks = load_tasks(TASK_RESULT_FILE)
     
-    # MAX_POOL_SIZE = 60
-    
-    
-    def ensure_task_pool_size():
-        if len(tasks['todo']) < MAX_POOL_SIZE:
-            padding_tasks = []
-            num_padding = MAX_POOL_SIZE - len(tasks['todo'])
-            for i in range(num_padding):
-                # 创建填充任务（相对路径以padding_开头，避免被跳过）
-                padding_task = {
-                    "relative_path": f"padding_{i}",
-                    "audio_duration_second": 15,  # 15秒（避免被跳过条件）
-                    # 其他字段可以留空，因为填充任务会特殊处理
-                }
-                padding_tasks.append(padding_task)
-            
-            tasks['todo'].extend(padding_tasks)
-            logger.info(f"Added {num_padding} padding tasks to ensure GPU utilization (now: {len(tasks['todo'])})")
-
     result_refs = []
     result_ref_map = {}
     last_save_time = time.time()
 
+    logger.info(f"Starting GPU processing with {len(tasks['todo'])} tasks remaining.")
+
+    # 主循环条件：只要还有待办任务，或者还有正在运行的任务结果没取回
     while tasks['todo'] or result_refs:
         
-        ensure_task_pool_size()
-        
-        optimal_task_func, MAX_NUM_PENDING_TASKS = get_optimal_task_strategy()
-
-        logger.debug(f"GPU-only: using {optimal_task_func._function.__name__}, MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
-
-        while tasks['todo'] and len(result_refs) < MAX_POOL_SIZE:
+        # 1. 提交任务 (Submission)
+        while len(result_refs) < MAX_POOL_SIZE and tasks['todo']:
+            
             task_batch = []
-            i = 0
-            while i < len(tasks['todo']):
-                task = tasks['todo'][i]
+            
+            # 过滤掉正在处理的任务和无效任务（预处理）
+            valid_batch_candidates = []
+            
+            idx_to_remove = []
+            for i, task in enumerate(tasks['todo']):
                 task_key = get_task_key(task)
-
+                
                 if task_key in tasks["processing"]:
-                    logger.warning(f"Task {task_key} is already processing. Removing from todo.")
-                    tasks['todo'].pop(i)
-                    continue  
-
+                    idx_to_remove.append(i)
+                    continue
                 if task["audio_duration_second"] < 10:
-                    logger.info(f"Skipping short task {task_key}. Removing from todo.")
-                    tasks['todo'].pop(i)
-                    continue 
-
-                task_batch.append(task)
-                i += 1 
-
-                if len(task_batch) >= BATCH_SIZE:
+                    logger.debug(f"Skipping short task {task_key}")
+                    idx_to_remove.append(i) 
+                    continue
+                
+                valid_batch_candidates.append(task)
+                idx_to_remove.append(i)
+                
+                if len(valid_batch_candidates) >= BATCH_SIZE:
                     break
+            
+            # 从 todo 中移除已被选走或跳过的项 (倒序移除以防索引偏移)
+            for i in sorted(idx_to_remove, reverse=True):
+                tasks['todo'].pop(i)
+            
+            task_batch = valid_batch_candidates
 
             if not task_batch:
+                # todo 扫完了都没凑出有效任务，跳出提交循环
                 break
+                
 
-            # 标记为处理中
+            if len(task_batch) < BATCH_SIZE:
+                logger.info(f"Padding last batch (size {len(task_batch)}) to {BATCH_SIZE}")
+                needed = BATCH_SIZE - len(task_batch)
+                for p_i in range(needed):
+                    task_batch.append({
+                        "relative_path": f"padding_{time.time()}_{p_i}",
+                        "audio_duration_second": 15
+                    })
+
             for task in task_batch:
-                tasks["processing"][get_task_key(task)] = task
+                if not task["relative_path"].startswith("padding_"):
+                    tasks["processing"][get_task_key(task)] = task
 
-            # 从todo移除已提交任务
-            tasks['todo'] = tasks['todo'][len(task_batch):]
-
-            logger.debug(f"Submitting GPU Batch (size={len(task_batch)}) starting with {get_task_key(task_batch[0])}...")
-
-            result_ref = optimal_task_func.remote(CONFIG_PATH, task_batch, PODCAST_PATH, OUTPUT_ROOT_DIR)
+            result_ref = handle_task_ray_gpu.remote(CONFIG_PATH, task_batch, PODCAST_PATH, OUTPUT_ROOT_DIR)
             result_refs.append(result_ref)
             result_ref_map[result_ref] = task_batch
+        
+        # 如果没有任务在跑且 todo 为空，直接结束
+        if not result_refs and not tasks['todo']:
+            break
 
-        if result_refs:
-            num_to_wait = min(max(10, int(len(result_refs) * 0.2)), 20, len(result_refs))
-            
-            ready_refs, result_refs = ray.wait(result_refs, num_returns=num_to_wait, timeout=5)
-            if not ready_refs:
-                print_progress(tasks)
-                time.sleep(0.1)
-                continue
 
-            logger.debug(f"Completed {len(ready_refs)} Batch(es). Remaining: {len(result_refs)}")
-
-            for ready_ref in ready_refs:
-                task_batch = result_ref_map.pop(ready_ref, None)
-                if task_batch is None:
-                    logger.error("Task batch not found in map. Skipping.")
-                    continue
-
-                try:
-                    successful_tasks, failed_tasks = ray.get(ready_ref)
-                except Exception as e:
-                    logger.error(f"Failed to get Batch result: {traceback.format_exc()}")
-                    for task in task_batch:
-                        task_key = get_task_key(task)
-                        tasks["processing"].pop(task_key, None)
-                        tasks['failed'].append(task)
-                        tasks['failed_num'] += 1
-                        tasks['failed_total_hour'] += task['audio_duration_second'] / 3600
-                    continue
-
-                for task in successful_tasks:
-                    task_key = get_task_key(task)
-                    tasks["processing"].pop(task_key, None)
-                    duration_hour = task['audio_duration_second'] / 3600
-                    tasks['complete'].append(task)
-                    tasks['complete_num'] += 1
-                    tasks['complete_total_hour'] += duration_hour
-
-                for task in failed_tasks:
-                    task_key = get_task_key(task)
-                    tasks["processing"].pop(task_key, None)
-                    duration_hour = task['audio_duration_second'] / 3600
-                    tasks['failed'].append(task)
-                    tasks['failed_num'] += 1
-                    tasks['failed_total_hour'] += duration_hour
-
+        wait_timeout = 10 if len(result_refs) >= MAX_POOL_SIZE else 0.5
+        ready_refs, result_refs = ray.wait(result_refs, num_returns=1, timeout=wait_timeout)
+        
+        if not ready_refs:
+            # 没结果返回，打印进度并继续循环尝试提交
             print_progress(tasks)
+            continue
+
+        for ready_ref in ready_refs:
+            task_batch = result_ref_map.pop(ready_ref, None)
+            
+            try:
+                successful_tasks, failed_tasks = ray.get(ready_ref)
+            except Exception as e:
+                logger.error(f"Ray get exception: {e}")
+                successful_tasks = []
+                failed_tasks = task_batch # 悲观策略，全算失败
+
+            # 处理成功任务
+            for task in successful_tasks:
+                if task["relative_path"].startswith("padding_"): continue
+                
+                task_key = get_task_key(task)
+                tasks["processing"].pop(task_key, None)
+                tasks['complete'].append(task)
+                tasks['complete_num'] += 1
+                tasks['complete_total_hour'] += task['audio_duration_second'] / 3600
+
+            # 处理失败任务
+            for task in failed_tasks:
+                if task["relative_path"].startswith("padding_"): continue
+
+                task_key = get_task_key(task)
+                tasks["processing"].pop(task_key, None)
+                tasks['failed'].append(task)
+                tasks['failed_num'] += 1
+                tasks['failed_total_hour'] += task['audio_duration_second'] / 3600
 
         current_time = time.time()
         if current_time - last_save_time >= SAVE_INTERVAL_SECONDS:
-            logger.debug("Saving tasks state (GPU-only mode)")
+            logger.info("Auto-saving tasks state...")
             save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
             last_save_time = current_time
+            print_progress(tasks)
+
+    logger.info("All tasks finished. Saving final state.")
+    save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
 
 def main():
-    ray.init(ignore_reinit_error=True)
+    ray.init(ignore_reinit_error=True) 
     try:
         run()
     except Exception as e:
