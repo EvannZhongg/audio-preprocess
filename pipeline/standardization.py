@@ -1,5 +1,6 @@
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
@@ -7,20 +8,18 @@ from pipeline.global_var import PipelineParam
 from utils.logger import time_logger
 
 
-@time_logger
-def standardization(audio_path):
+def standardization(audio_path, timeout=120):
+
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg
     target_sample_rate = cfg["entrypoint"]["SAMPLE_RATE"]
     target_dBFS = -20
     
-
-    FFMPEG_TIMEOUT = 900  # 10分钟
-    
     name = os.path.basename(audio_path)
     
     cmd = [
         "ffmpeg",
+        "-threads", "8",         
         "-i", audio_path,
         "-ar", str(target_sample_rate),
         "-ac", "1",
@@ -30,26 +29,26 @@ def standardization(audio_path):
         "-"
     ]
     
-    logger.info(f"Stream processing via FFmpeg (Raw PCM): {name}")
     
     proc = None
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
         
         try:
-            raw_data, stderr = proc.communicate(timeout=FFMPEG_TIMEOUT)
+            raw_data, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            logger.error(f"FFmpeg timed out after {FFMPEG_TIMEOUT}s: {name}")
+            logger.error(f"TIMEOUT ({timeout}s): Killing process for {name}")
             proc.kill() 
             proc.communicate() 
-            raise RuntimeError(f"FFmpeg timeout processing {name}")
+            return None
 
         if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
+            logger.error(f"FFmpeg Error for {name}: {stderr.decode()}")
+            return None
         
         if not raw_data:
-            logger.warning("Empty audio output from FFmpeg.")
-            return {"waveform": np.array([], dtype=np.float32), "name": name, "sample_rate": target_sample_rate, "duration": 0}
+            logger.warning(f"Empty output for {name}")
+            return None
 
         waveform_int16 = np.frombuffer(raw_data, dtype=np.int16)
         waveform = waveform_int16.astype(np.float32) / 32768.0
@@ -75,11 +74,12 @@ def standardization(audio_path):
             "waveform": waveform,
             "name": name,
             "sample_rate": target_sample_rate,
-            "duration": duration
+            "duration": duration,
+            "original_path": audio_path
         }
 
     except Exception as e:
         if proc and proc.poll() is None:
             proc.kill()
-        logger.error(f"Error processing {audio_path}: {e}")
-        raise e
+        logger.error(f"Exception processing {name}: {e}")
+        return None 
