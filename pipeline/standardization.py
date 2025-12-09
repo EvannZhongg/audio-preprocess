@@ -14,6 +14,9 @@ def standardization(audio_path):
     target_sample_rate = cfg["entrypoint"]["SAMPLE_RATE"]
     target_dBFS = -20
     
+
+    FFMPEG_TIMEOUT = 900  # 10分钟
+    
     name = os.path.basename(audio_path)
     
     cmd = [
@@ -29,25 +32,29 @@ def standardization(audio_path):
     
     logger.info(f"Stream processing via FFmpeg (Raw PCM): {name}")
     
+    proc = None
     try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
+        
+        try:
+            raw_data, stderr = proc.communicate(timeout=FFMPEG_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            logger.error(f"FFmpeg timed out after {FFMPEG_TIMEOUT}s: {name}")
+            proc.kill() 
+            proc.communicate() 
+            raise RuntimeError(f"FFmpeg timeout processing {name}")
 
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7) as proc:
-            raw_data, stderr = proc.communicate()
-            
-            if proc.returncode != 0:
-                raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg error: {stderr.decode()}")
         
         if not raw_data:
             logger.warning("Empty audio output from FFmpeg.")
             return {"waveform": np.array([], dtype=np.float32), "name": name, "sample_rate": target_sample_rate, "duration": 0}
 
-        # Bytes 转为 Numpy Array
         waveform_int16 = np.frombuffer(raw_data, dtype=np.int16)
         waveform = waveform_int16.astype(np.float32) / 32768.0
-        
         duration = len(waveform) / target_sample_rate
-        logger.debug(f"Audio loaded via Raw PCM. Shape: {waveform.shape}, Duration: {duration:.2f}s")
-
+ 
         rms = np.sqrt(np.mean(waveform**2))
         if rms > 0:
             current_dBFS = 20 * np.log10(rms)
@@ -72,5 +79,7 @@ def standardization(audio_path):
         }
 
     except Exception as e:
+        if proc and proc.poll() is None:
+            proc.kill()
         logger.error(f"Error processing {audio_path}: {e}")
         raise e
