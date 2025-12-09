@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 import uuid
 
@@ -11,6 +12,11 @@ from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models.eres2net.features import FBank
 from utils.logger import Logger
 from utils.tool import detect_gpu
+
+try:
+    import models.gemini_asr as gemini_asr  # 假设路径是这样，根据实际情况修改
+except ImportError:
+    pass
 
 
 class PipelineParam:
@@ -128,21 +134,13 @@ def init_pipeline_global(config, cli_args):
     - Sets up logger and device (GPU).
     - Loads all models into global variables for this process.
     """
-    # from multiprocessing.process import current_process
-    # worker_id_str = current_process().name
-    # if worker_id_str == "MainProcess":
-    #     worker_id = 0
-    # else:
-    #     worker_id = int(worker_id_str.split('-')[-1]) - 1
-    if torch.cuda.is_available():
-        try:
-            gpu_id = torch.cuda.current_device()
-            worker_id = f"gpu{gpu_id}"
-        except:
-            worker_id = str(uuid.uuid4())[:6]
-    else:
-        worker_id = "cpu"
-
+    process_name = multiprocessing.current_process().name
+    try:
+        worker_id_int = int(process_name.split('-')[-1])
+    except ValueError:
+        # If unable to extract (e.g., in main process debugging), default to 1
+        worker_id_int = 1
+    worker_id = f"worker_{worker_id_int}"
 
     # 1. Setup globals
     g_args = cli_args
@@ -172,13 +170,15 @@ def init_pipeline_global(config, cli_args):
         if not available_gpus:
              raise RuntimeError("No GPUs available for processing.")
 
-        # Assign worker to an available GPU
-        # gpu_id = available_gpus[worker_id % len(available_gpus)]
-        gpu_id = 0
+        gpu_index = (worker_id_int - 1) % len(available_gpus)
+        target_gpu_id = available_gpus[gpu_index]
         
-        logger.info(f"Worker {worker_id} using GPU {gpu_id} (from available list: {available_gpus})")
-        device_name = f"cuda:{gpu_id}"
+        device_name = f"cuda:{target_gpu_id}"
         device = torch.device(device_name)
+        
+        torch.cuda.set_device(device)
+        
+        logger.info(f"Initialized {worker_id} on GPU {target_gpu_id} (Mapped from index {gpu_index})")
     else:
         logger.info(f"Worker {worker_id} using CPU, threads: {g_args.threads}")
         device_name = "cpu"
