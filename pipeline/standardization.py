@@ -8,7 +8,7 @@ from pipeline.global_var import PipelineParam
 from utils.logger import time_logger
 
 
-def standardization(audio_path, timeout=120):
+def standardization(audio_path, num_threads=8, timeout=200):
 
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg
@@ -19,7 +19,7 @@ def standardization(audio_path, timeout=120):
     
     cmd = [
         "ffmpeg",
-        "-threads", "8",         
+        "-threads", str(num_threads),         
         "-i", audio_path,
         "-ar", str(target_sample_rate),
         "-ac", "1",
@@ -51,7 +51,11 @@ def standardization(audio_path, timeout=120):
             return None
 
         waveform_int16 = np.frombuffer(raw_data, dtype=np.int16)
+        del raw_data
+        
         waveform = waveform_int16.astype(np.float32) / 32768.0
+        del waveform_int16
+        
         duration = len(waveform) / target_sample_rate
  
         rms = np.sqrt(np.mean(waveform**2))

@@ -25,6 +25,7 @@ from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 # ------------------------------------------------------------------
 
 SAVE_INTERVAL_SECONDS = 3 * 3600
+MAX_AUDIO_DURATION_SECONDS = 2 * 3600
 
 # ------------------------------------------------------------------
 # --- Utilities ---
@@ -156,6 +157,15 @@ def run():
                     continue
                 if task["audio_duration_second"] < 10:
                     logger.debug(f"Skipping short task {task_key}")
+                    idx_to_remove.append(i) 
+                    continue
+                
+                if task["audio_duration_second"] > MAX_AUDIO_DURATION_SECONDS:
+                    logger.warning(f"Skipping too long task {task_key}: {task['audio_duration_second']}s > {MAX_AUDIO_DURATION_SECONDS}s")
+                    tasks['failed'].append(task)
+                    tasks['failed_num'] += 1
+                    tasks['failed_total_hour'] += task['audio_duration_second'] / 3600
+                    
                     idx_to_remove.append(i) 
                     continue
                 
