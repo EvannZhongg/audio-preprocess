@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 from pathlib import Path
 
 from pipeline.asr_process import asr
@@ -15,6 +16,7 @@ from pipeline.vad_process import (cut_by_speaker_label,
 from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
 
+_vad_lock = threading.Lock()
 
 def file_is_large(audio_path):
     try:
@@ -105,9 +107,11 @@ def main_process(manifest_entry, output_folder, report_path):
     }
     diarize_df["speaker"] = diarize_df["speaker"].map(speaker_mapping)
     logger.info(f"Renamed speaker labels for '{audio_path}' using hash '{file_hash}'. New format: SPK_{file_hash}_ID")
-
-    logger.info("Step 3: Fine-grained Segmentation by VAD")
-    vad_list_initial = vad_model.vad(diarize_df, audio)
+    
+    with _vad_lock:
+        logger.info("Step 3: Fine-grained Segmentation by VAD")
+        vad_list_initial = vad_model.vad(diarize_df, audio)
+        
     processing_stats['initial']['count'] = len(vad_list_initial)
     processing_stats['initial']['duration'] = sum(s["end"] - s["start"] for s in vad_list_initial)
     
