@@ -23,11 +23,16 @@
 
 DATASET_NAME = "podcasts/xiaoyuzhou"
 CONFIG_PATH = "./configs/config_for_v100.json"
+MAX_WORKERS = 4
+TIME_OUT = 200
+CPU_PER_TASK_CPU = 2
 MAX_POOL_SIZE = 50
 BATCH_SIZE = 10
 CPU_PER_TASK_GPU = 8
 GPU_PER_TASK = 1
-CPU_PER_TASK_CPU = 4 
+MAX_AUDIO_DURATION_SECONDS = 3 * 3600  # 超过3小时音频直接过滤
+
+
 
 
 

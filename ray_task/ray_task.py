@@ -14,7 +14,8 @@ from utils.logger import Logger
 logger = Logger.get_logger(f"ray-task")
 
 from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_GPU,
-                             DATASET_NAME, GPU_PER_TASK, MAX_POOL_SIZE,
+                             DATASET_NAME, GPU_PER_TASK,
+                             MAX_AUDIO_DURATION_SECONDS, MAX_POOL_SIZE,
                              OUTPUT_PATH, OUTPUT_ROOT_DIR, PODCAST_PATH,
                              TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
@@ -25,7 +26,6 @@ from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 # ------------------------------------------------------------------
 
 SAVE_INTERVAL_SECONDS = 3 * 3600
-MAX_AUDIO_DURATION_SECONDS = 2 * 3600
 
 # ------------------------------------------------------------------
 # --- Utilities ---
@@ -130,6 +130,7 @@ def run():
     os.makedirs(OUTPUT_PATH, exist_ok=True)
 
     tasks = load_tasks(TASK_RESULT_FILE)
+    tasks['todo'].sort(key=lambda x: x['audio_duration_second'])
     
     result_refs = []
     result_ref_map = {}
