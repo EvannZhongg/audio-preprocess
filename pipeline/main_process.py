@@ -17,6 +17,7 @@ from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
 
 _vad_lock = threading.Lock()
+_dia_lock = threading.Lock()
 
 def file_is_large(audio_path):
     try:
@@ -96,8 +97,9 @@ def main_process(manifest_entry, output_folder, report_path):
     else:
         logger.info("Skipping source separation as per config.")
 
-    logger.info("Step 2: Speaker Diarization")
-    diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
+    with _dia_lock:
+        logger.info("Step 2: Speaker Diarization")
+        diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
 
     # Rename speaker labels to be unique for the batch run
     file_hash = get_short_hash(audio_path, length=8) # Use full path for uniqueness
