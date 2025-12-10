@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pipeline import global_var
 from pipeline.main_process import main_process
-from ray_task.config import CPU_PER_TASK_CPU, MAX_WORKERS
+from ray_task.config import MAX_WORKERS, TORCH_THREAD_NUM
 from utils.tool import load_cfg
 
 _pipeline_initialized = False
@@ -28,7 +28,7 @@ class TaskCmdArgs:
     batch_size: int = 8
     compute_type: str = 'float16'
     whisper_arch: str = 'medium'
-    threads: int = CPU_PER_TASK_CPU
+    threads: int = TORCH_THREAD_NUM
     
     
 def _ensure_pipeline_initialized(config_path):
