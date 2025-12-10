@@ -79,6 +79,9 @@ def main_process(manifest_entry, output_folder, report_path):
 
     logger.info("Step 0: Preprocess all audio files --> 24k sample rate + wave format + loudnorm + bit depth 16")
     audio = standardization(audio_path)
+    if audio is None:
+        logger.error(f"Standardization failed (Skipped/Timeout/Error) for: {audio_path}")
+        return None, []
     
     meta_info.update_origin(raw_audio_path=audio_path)
     meta_info.update_origin(sample_rate=audio['sample_rate'])

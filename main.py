@@ -65,6 +65,12 @@ def collect_manifest_entries(args, logger):
 
     return manifest_entries
 
+def safe_process_wrapper(entry, output_folder, report_path):
+    try:
+        main_process(entry, output_folder, report_path)
+    except Exception as e:
+        print(f"\n[ERROR] Failed to process {entry.get('FilePath', 'unknown')}: {e}")
+        # traceback.print_exc()
 
 def main():
     args = get_cmd_args()

@@ -1,14 +1,17 @@
+import json
 import os
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
 from pipeline.global_var import PipelineParam
+from ray_task.config import (CPU_PER_TASK_CPU, MAX_AUDIO_DURATION_SECONDS,
+                             TIME_OUT)
 from utils.logger import time_logger
 
 
-def standardization(audio_path, num_threads=8, timeout=200):
+@time_logger
+def standardization(audio_path, num_threads=CPU_PER_TASK_CPU, timeout=TIME_OUT):
 
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg
@@ -17,6 +20,27 @@ def standardization(audio_path, num_threads=8, timeout=200):
     
     name = os.path.basename(audio_path)
     
+    dynamic_timeout = timeout
+    try:
+        probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", audio_path]
+        probe_out = subprocess.check_output(probe_cmd, stderr=subprocess.STDOUT, timeout=5)
+        duration_info = json.loads(probe_out)
+        duration_sec = float(duration_info['format']['duration'])
+        
+        #  OOM 熔断机制：超过最大时长直接跳过
+        if duration_sec > MAX_AUDIO_DURATION_SECONDS:
+            logger.warning(f"SKIP Huge Audio (>{MAX_AUDIO_DURATION_SECONDS}): {name} ({duration_sec:.1f}s)")
+            return None
+            
+        calc_timeout = 60 + int(duration_sec / 40)
+        dynamic_timeout = max(timeout, calc_timeout)
+        
+    except Exception as e:
+        # 如果 ffprobe 失败 (如文件头损坏)，交给后续 ffmpeg 尝试处理，使用默认超时
+        logger.debug(f"Probe failed for {name}, using default logic: {e}")
+        dynamic_timeout = timeout
+    # ===============================================================
+
     cmd = [
         "ffmpeg",
         "-threads", str(num_threads),         
@@ -29,15 +53,15 @@ def standardization(audio_path, num_threads=8, timeout=200):
         "-"
     ]
     
-    
     proc = None
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**7)
         
         try:
-            raw_data, stderr = proc.communicate(timeout=timeout)
+            # 使用动态计算的超时时间
+            raw_data, stderr = proc.communicate(timeout=dynamic_timeout)
         except subprocess.TimeoutExpired:
-            logger.error(f"TIMEOUT ({timeout}s): Killing process for {name}")
+            logger.error(f"TIMEOUT ({dynamic_timeout}s): Killing process for {name}")
             proc.kill() 
             proc.communicate() 
             return None
@@ -50,15 +74,20 @@ def standardization(audio_path, num_threads=8, timeout=200):
             logger.warning(f"Empty output for {name}")
             return None
 
+        # --- 内存管理关键区 ---
         waveform_int16 = np.frombuffer(raw_data, dtype=np.int16)
-        del raw_data
+        del raw_data  # 立即释放原始字节流
         
         waveform = waveform_int16.astype(np.float32) / 32768.0
-        del waveform_int16
+        del waveform_int16 # 立即释放
+        # --------------------
         
         duration = len(waveform) / target_sample_rate
  
-        rms = np.sqrt(np.mean(waveform**2))
+        # 优化 RMS 计算，避免生成中间大数组
+        mean_square = np.mean(np.square(waveform))
+        rms = np.sqrt(mean_square)
+
         if rms > 0:
             current_dBFS = 20 * np.log10(rms)
         else:
@@ -68,7 +97,8 @@ def standardization(audio_path, num_threads=8, timeout=200):
         limited_gain_db = min(max(gain_db, -3), 3)
         gain_factor = 10 ** (limited_gain_db / 20)
         
-        waveform = waveform * gain_factor
+        # In-place 乘法，稍微节省一点内存
+        waveform *= gain_factor
         
         max_amplitude = np.max(np.abs(waveform))
         if max_amplitude > 1.0:
@@ -86,4 +116,4 @@ def standardization(audio_path, num_threads=8, timeout=200):
         if proc and proc.poll() is None:
             proc.kill()
         logger.error(f"Exception processing {name}: {e}")
-        return None 
+        return None
