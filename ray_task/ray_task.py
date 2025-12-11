@@ -90,7 +90,7 @@ def get_task_key(task):
 # --- Worker Logic ---
 # ------------------------------------------------------------------
 
-def handle_task(config_path, task_batch, prefix_path, output_path):
+def handle_task(config_path, task_batch, prefix_path, output_path, timeout_seconds):
     successful_tasks = []
     failed_tasks = []
     
@@ -254,7 +254,7 @@ def run():
             logger.info("Auto-saving...")
             save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
             last_save_time = current_time
-            monitor.report(tasks, force_send=True)
+            # monitor.report(tasks, force_send=True)
 
     logger.info("Done.")
     save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
