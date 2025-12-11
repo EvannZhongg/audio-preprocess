@@ -5,13 +5,13 @@ import subprocess
 import numpy as np
 
 from pipeline.global_var import PipelineParam
-from ray_task.config import (CPU_PER_TASK_CPU, MAX_AUDIO_DURATION_SECONDS,
-                             TIME_OUT)
+from ray_task.config import (CPU_PER_TASK_CPU, FFMPEG_TIME_OUT,
+                             MAX_AUDIO_DURATION_SECONDS)
 from utils.logger import time_logger
 
 
 @time_logger
-def standardization(audio_path, num_threads=CPU_PER_TASK_CPU, timeout=TIME_OUT):
+def standardization(audio_path, num_threads=CPU_PER_TASK_CPU, timeout=FFMPEG_TIME_OUT):
 
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg

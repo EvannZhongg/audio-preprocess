@@ -22,6 +22,7 @@ CONFIG_PATH = "./configs/config_for_v100.json"
 # [显存安全锁]
 # 限制 Worker 内部同时处理 3 个音频
 MAX_WORKERS = 3
+# MAX_WORKERS = 2
 
 # [Ray 资源预留]
 # 每个 Ray Worker 占用 1 整张 GPU
@@ -39,6 +40,7 @@ CPU_PER_TASK_GPU = 10
 # [FFmpeg]
 # 音频解码核心数
 CPU_PER_TASK_CPU = 2
+# MAX_WORKERS = 4
 
 # [ONNX/Torch] 
 # PyTorch/ONNX 分配核心数
@@ -50,15 +52,17 @@ TORCH_THREAD_NUM = 1
 
 # [超时安全线]
 # 音频多线程解码超时(支持解码约3小时音频)
-TIME_OUT = 800 
+FFMPEG_TIME_OUT = 1200 
+
 
 # [调度缓冲]
-# 配合 MAX_WORKERS=2，单个worker每次处理 32 个音频
+# 配合 MAX_WORKERS=3，单个worker每次处理 32 个音频
 BATCH_SIZE = 32
+LONG_AUDIO_BATCH_SIZE = 3 # 长音频包含的音频数量
 
 # [任务队列上限]
-# 防止 Driver 内存溢出，保持默认即可。
-MAX_POOL_SIZE = 50
+MAX_POOL_SIZE = 60
+
 
 # [OOM 熔断]
 # 超过 3 小时的音频直接过滤
