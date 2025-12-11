@@ -32,7 +32,7 @@ def standardization(audio_path, num_threads=CPU_PER_TASK_CPU, timeout=TIME_OUT):
             logger.warning(f"SKIP Huge Audio (>{MAX_AUDIO_DURATION_SECONDS}): {name} ({duration_sec:.1f}s)")
             return None
             
-        calc_timeout = 60 + int(duration_sec / 25)
+        calc_timeout = 60 + int(duration_sec / 24)
         dynamic_timeout = max(timeout, calc_timeout)
         
     except Exception as e:

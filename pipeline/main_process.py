@@ -18,6 +18,7 @@ from utils.tool import export_to_metadata, get_short_hash
 
 _vad_lock = threading.Lock()
 _dia_lock = threading.Lock()
+_sep_lock = threading.Lock()
 
 def file_is_large(audio_path):
     try:
@@ -93,7 +94,8 @@ def main_process(manifest_entry, output_folder, report_path):
     logger.info("Step 1: Source Separation")
     # Add a check in config to decide whether to run this step
     if cfg["separate"].get("enable", True):
-        audio = source_separation(separate_predictor1, audio)
+        with _sep_lock:
+            audio = source_separation(separate_predictor1, audio)
     else:
         logger.info("Skipping source separation as per config.")
 

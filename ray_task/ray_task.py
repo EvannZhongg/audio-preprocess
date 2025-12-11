@@ -114,8 +114,7 @@ def print_progress(tasks):
         percent = 0
 
     log_str = (f"{DATASET_NAME}: Progress {percent:.2f}% | "
-               f"Done: {round(handled_hour, 2)}h | Failed: {round(failed_hour, 2)}h | "
-               f"Pending Batch: {len(tasks['todo']) // BATCH_SIZE}")
+               f"Done: {round(handled_hour, 2)}h | Failed: {round(failed_hour, 2)}h | Total: {round(total_hour, 2)}h")
     
     logger.debug(log_str)
     if time.time() - last_send_bot_msg > 3 * 3600: 

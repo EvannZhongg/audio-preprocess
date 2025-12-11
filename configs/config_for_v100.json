@@ -31,7 +31,7 @@
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "batch_size": 16
+        "batch_size": 32
     },
     "whisper":{
         "model": "openai/whisper-large-v3-turbo",
@@ -75,10 +75,10 @@
         },
         "smru": {
             "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
-            "chunk_size": 8,
+            "chunk_size": 10,
             "valid_size": 8,
-            "overlap": 1,
-            "batch_size": 8
+            "overlap": 2,
+            "batch_size": 12
         }
     },
     "strategy_parameters": {
