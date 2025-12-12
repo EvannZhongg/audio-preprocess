@@ -5,10 +5,10 @@ pipeline:
   params:
     clustering: AgglomerativeClustering
     embedding: /root/.cache/torch/pyannote/models--pyannote--wespeaker-voxceleb-resnet34-LM/snapshots/837717ddb9ff5507820346191109dc79c958d614/pytorch_model.bin
-    embedding_batch_size: 32
+    embedding_batch_size: 64
     embedding_exclude_overlap: true
     segmentation: /root/.cache/torch/pyannote/models--pyannote--segmentation-3.0/snapshots/e66f3d3b9eb0873085418a7b813d3b369bf160bb/pytorch_model.bin
-    segmentation_batch_size: 32
+    segmentation_batch_size: 64
 
 params:
   clustering:

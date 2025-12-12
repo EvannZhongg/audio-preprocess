@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 from typing import List, Union
 
 import numpy as np
@@ -32,6 +33,8 @@ class FunASR:
         self.device = device
         self.asr_model = asr_model
         self.inference_batch_size = kwargs.get("batch_size", 16) 
+        
+        self.inference_lock = threading.Lock()
 
         with FileLock(lock_file):
             logger.debug(f"Acquired lock for FunASR model: {model_dir}")
@@ -109,43 +112,44 @@ class FunASR:
             batch_size = self.inference_batch_size
             total_files = len(input_file_paths)
             
-            for i in range(0, total_files, batch_size):
-                batch_paths = input_file_paths[i : i + batch_size]
-                batch_results_chunk = []
-                
-                try:
-                    with torch.no_grad():
-                        if self.asr_model == "ParaFormer":
-                            # 为当前 Batch 创建一个 scp 文件
-                            batch_scp_path = os.path.join(temp_dir, f"filelist_batch_{i}.scp")
-                            with open(batch_scp_path, 'w') as f:
-                                for path in batch_paths:
-                                    f.write(f"{path}\n")
-                            
-                            # 调用推理
-                            res = self.model(input=batch_scp_path, batch_size=batch_size)
-                            batch_results_chunk = res if isinstance(res, list) else [res]
-                            
-                        elif self.asr_model == "SenseVoice":
-                            res = self.model.generate(
-                                input=batch_paths,
-                                language="auto",
-                                use_itn=True,
-                                batch_size_s=0, # Disable internal dynamic batching to control strictly
-                                batch_size=len(batch_paths)
-                            )
-                            batch_results_chunk = res if isinstance(res, list) else [res]
+            with self.inference_lock:
+                for i in range(0, total_files, batch_size):
+                    batch_paths = input_file_paths[i : i + batch_size]
+                    batch_results_chunk = []
                     
-                    all_inference_results.extend(batch_results_chunk)
+                    try:
+                        with torch.no_grad():
+                            if self.asr_model == "ParaFormer":
+                                # 为当前 Batch 创建一个 scp 文件
+                                batch_scp_path = os.path.join(temp_dir, f"filelist_batch_{i}.scp")
+                                with open(batch_scp_path, 'w') as f:
+                                    for path in batch_paths:
+                                        f.write(f"{path}\n")
+                                
+                                # 调用推理
+                                res = self.model(input=batch_scp_path, batch_size=batch_size)
+                                batch_results_chunk = res if isinstance(res, list) else [res]
+                                
+                            elif self.asr_model == "SenseVoice":
+                                res = self.model.generate(
+                                    input=batch_paths,
+                                    language="auto",
+                                    use_itn=True,
+                                    batch_size_s=0, # Disable internal dynamic batching to control strictly
+                                    batch_size=len(batch_paths)
+                                )
+                                batch_results_chunk = res if isinstance(res, list) else [res]
+                        
+                        all_inference_results.extend(batch_results_chunk)
 
-                except Exception as e:
-                    logger.error(f"Error during batch inference at index {i}: {e}")
-                    all_inference_results.extend([{"text": ""}] * len(batch_paths))
-                
-                finally:
-                    del batch_results_chunk
-                    if 'res' in locals(): del res
-                    self._clear_memory()
+                    except Exception as e:
+                        logger.error(f"Error during batch inference at index {i}: {e}")
+                        all_inference_results.extend([{"text": ""}] * len(batch_paths))
+                    
+                    finally:
+                        del batch_results_chunk
+                        if 'res' in locals(): del res
+                        self._clear_memory()
 
             full_text_results = [""] * len(vad_segments)
             limit = min(len(all_inference_results), len(non_empty_segment_indices))

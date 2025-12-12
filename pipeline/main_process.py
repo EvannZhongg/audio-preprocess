@@ -1,8 +1,11 @@
+import gc
 import json
 import os
 import re
 import threading
 from pathlib import Path
+
+import torch
 
 from pipeline.asr_process import asr
 from pipeline.metrics_prediction import filter_by_metrics, metrics_prediction
@@ -96,12 +99,20 @@ def main_process(manifest_entry, output_folder, report_path):
     if cfg["separate"].get("enable", True):
         with _sep_lock:
             audio = source_separation(separate_predictor1, audio)
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.debug("SMRU memory cleared. VRAM released.")
     else:
         logger.info("Skipping source separation as per config.")
 
     with _dia_lock:
         logger.info("Step 2: Speaker Diarization")
         diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.debug("Diarization memory cleared. VRAM released.")
 
     # Rename speaker labels to be unique for the batch run
     file_hash = get_short_hash(audio_path, length=8) # Use full path for uniqueness
@@ -200,4 +211,7 @@ def main_process(manifest_entry, output_folder, report_path):
     except Exception as e:
         logger.error(f"Failed to append to report for {audio_path}: {e}")
 
+    return final_path, filtered_list
+
+    return final_path, filtered_list
     return final_path, filtered_list
