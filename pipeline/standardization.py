@@ -34,6 +34,10 @@ def standardization(audio_path, num_threads=CPU_PER_TASK_CPU, timeout=FFMPEG_TIM
             
         calc_timeout = 60 + int(duration_sec / 24)
         dynamic_timeout = max(timeout, calc_timeout)
+    
+    except subprocess.TimeoutExpired:
+        logger.error(f"IO Hang detected during probe: {name} took too long. Skipping.")
+        return None
         
     except Exception as e:
         # 如果 ffprobe 失败 (如文件头损坏)，交给后续 ffmpeg 尝试处理，使用默认超时
