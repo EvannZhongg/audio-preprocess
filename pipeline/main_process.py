@@ -2,7 +2,6 @@ import gc
 import json
 import os
 import re
-import threading
 from pathlib import Path
 
 import torch
@@ -19,9 +18,6 @@ from pipeline.vad_process import (cut_by_speaker_label,
 from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
 
-_vad_lock = threading.Lock()
-_dia_lock = threading.Lock()
-_sep_lock = threading.Lock()
 
 def file_is_large(audio_path):
     try:
@@ -97,22 +93,21 @@ def main_process(manifest_entry, output_folder, report_path):
     logger.info("Step 1: Source Separation")
     # Add a check in config to decide whether to run this step
     if cfg["separate"].get("enable", True):
-        with _sep_lock:
-            audio = source_separation(separate_predictor1, audio)
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            logger.debug("SMRU memory cleared. VRAM released.")
-    else:
-        logger.info("Skipping source separation as per config.")
-
-    with _dia_lock:
-        logger.info("Step 2: Speaker Diarization")
-        diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
+        audio = source_separation(separate_predictor1, audio)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        logger.debug("Diarization memory cleared. VRAM released.")
+        logger.debug("SMRU memory cleared. VRAM released.")
+    else:
+        logger.info("Skipping source separation as per config.")
+
+
+    logger.info("Step 2: Speaker Diarization")
+    diarize_df, speaker_centroids = speaker_diarization(dia_pipeline, audio, provider=cfg.get("diarization_provider", "pyannote"))
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.debug("Diarization memory cleared. VRAM released.")
 
     # Rename speaker labels to be unique for the batch run
     file_hash = get_short_hash(audio_path, length=8) # Use full path for uniqueness
@@ -123,9 +118,8 @@ def main_process(manifest_entry, output_folder, report_path):
     diarize_df["speaker"] = diarize_df["speaker"].map(speaker_mapping)
     logger.info(f"Renamed speaker labels for '{audio_path}' using hash '{file_hash}'. New format: SPK_{file_hash}_ID")
     
-    with _vad_lock:
-        logger.info("Step 3: Fine-grained Segmentation by VAD")
-        vad_list_initial = vad_model.vad(diarize_df, audio)
+    logger.info("Step 3: Fine-grained Segmentation by VAD")
+    vad_list_initial = vad_model.vad(diarize_df, audio)
         
     processing_stats['initial']['count'] = len(vad_list_initial)
     processing_stats['initial']['duration'] = sum(s["end"] - s["start"] for s in vad_list_initial)
@@ -135,8 +129,7 @@ def main_process(manifest_entry, output_folder, report_path):
         logger.info("Step 3.5: Refining VAD list by speaker embedding for internal consistency.")
         inter_similarity_threshold = cfg.get("strategy_parameters", {}).get("inter_similarity_threshold", 0.7)
         refinement_batch_size = cfg.get("strategy_parameters", {}).get("refinement_batch_size", 64)
-        with _vad_lock:
-            vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_batch_size, refinement_feature_extractor, device)
+        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_batch_size, refinement_feature_extractor, device)
         update_stats(processing_stats, 'embedding_refinement', vad_list_initial, vad_list_refined)
     else:
         vad_list_refined = vad_list_initial
@@ -211,7 +204,4 @@ def main_process(manifest_entry, output_folder, report_path):
     except Exception as e:
         logger.error(f"Failed to append to report for {audio_path}: {e}")
 
-    return final_path, filtered_list
-
-    return final_path, filtered_list
     return final_path, filtered_list

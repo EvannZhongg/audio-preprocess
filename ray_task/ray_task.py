@@ -126,7 +126,7 @@ def handle_task(config_path, task_batch, prefix_path, output_path):
             
     return successful_tasks, failed_tasks
 
-@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="SPREAD", max_retries=0)
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="SPREAD", max_calls=1, max_retries=0)
 def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path):
     return handle_task(config_path, task_batch, audio_prefix_path, output_path)
 

@@ -1,5 +1,3 @@
-import threading
-
 import librosa
 import numpy as np
 import tqdm
@@ -7,7 +5,6 @@ import tqdm
 from utils.logger import time_logger
 from utils.tool import calculate_audio_stats
 
-_metric_lock = threading.Lock()
 
 @time_logger
 def metrics_prediction(audio, vad_list, metrics_filter_cfg):
@@ -36,20 +33,20 @@ def metrics_prediction(audio, vad_list, metrics_filter_cfg):
     audio = librosa.resample(
         audio, orig_sr=cfg["entrypoint"]["SAMPLE_RATE"], target_sr=sample_rate
     )
-    with _metric_lock:
-        for index, vad in enumerate(tqdm.tqdm(vad_list, desc="METRICS")):
-            start, end = int(vad["start"] * sample_rate), int(vad["end"] * sample_rate)
-            segment = audio[start:end]
 
-            dnsmos = dnsmos_compute_score(segment, sample_rate, False)["OVRL"]
-            vad_list[index]["dnsmos"] = dnsmos
-            if brouhaha_metric is not None:
-                c50, snr = brouhaha_metric(segment, sample_rate)
-                vad_list[index]["c50"] = c50
-                vad_list[index]["snr"] = snr
-            else:
-                vad_list[index]["c50"] = metrics_filter_cfg.get("fixed_c50_threshold", 40.0)
-                vad_list[index]["snr"] = metrics_filter_cfg.get("fixed_snr_threshold", 40.0)
+    for index, vad in enumerate(tqdm.tqdm(vad_list, desc="METRICS")):
+        start, end = int(vad["start"] * sample_rate), int(vad["end"] * sample_rate)
+        segment = audio[start:end]
+
+        dnsmos = dnsmos_compute_score(segment, sample_rate, False)["OVRL"]
+        vad_list[index]["dnsmos"] = dnsmos
+        if brouhaha_metric is not None:
+            c50, snr = brouhaha_metric(segment, sample_rate)
+            vad_list[index]["c50"] = c50
+            vad_list[index]["snr"] = snr
+        else:
+            vad_list[index]["c50"] = metrics_filter_cfg.get("fixed_c50_threshold", 40.0)
+            vad_list[index]["snr"] = metrics_filter_cfg.get("fixed_snr_threshold", 40.0)
 
     predict_dnsmos = np.mean([vad["dnsmos"] for vad in vad_list])
     predict_c50 = np.mean([vad["c50"] for vad in vad_list])

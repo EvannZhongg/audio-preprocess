@@ -1,17 +1,22 @@
 import os
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
+import torch
+import time
+import random 
 from dataclasses import dataclass
+import logging
 
 from pipeline import global_var
 from pipeline.main_process import main_process
-from ray_task.config import MAX_WORKERS, TORCH_THREAD_NUM
+from ray_task.config import TORCH_THREAD_NUM
 from utils.tool import load_cfg
+
+logger = logging.getLogger(__name__)
 
 _pipeline_initialized = False
 _init_lock = threading.Lock()
-
 
 def get_task_key(task):
     return task["relative_path"]
@@ -30,10 +35,8 @@ class TaskCmdArgs:
     whisper_arch: str = 'medium'
     threads: int = TORCH_THREAD_NUM
     
-    
 def _ensure_pipeline_initialized(config_path):
     global _pipeline_initialized
-
     if not _pipeline_initialized:
         with _init_lock:
             if not _pipeline_initialized:
@@ -46,64 +49,82 @@ def _ensure_pipeline_initialized(config_path):
                     raise RuntimeError(f"Failed to initialize pipeline: {e}") from e
 
 
+def calculate_smart_jitter(file_path):
+    """
+    根据文件大小计算合理的抖动时间。
+    避免对短音频等待过久，同时确保长音频能有效错峰。
+    """
+    try:
+        size_bytes = os.path.getsize(file_path)
+        size_mb = size_bytes / (1024 * 1024)
+        if size_mb > 200:
+            return random.uniform(15, 40) 
+        
+        elif size_mb > 50:
+            return random.uniform(5, 15)
+            
+        else:
+            return random.uniform(1, 4)
+            
+    except Exception:
+        return random.uniform(1, 3)
+
 def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_dir):
     try:
         _ensure_pipeline_initialized(config_path)
-
-        logger = getattr(global_var.PipelineParam, 'logger', None)
-        if logger is None:
-            import logging
-            logger = logging.getLogger("FallbackLogger")
-            
-        logger.info(f"Processing batch on device: {getattr(global_var.PipelineParam, 'device', 'unknown')}")
+        global_logger = getattr(global_var.PipelineParam, 'logger', logger)
+        global_logger.info(f"Processing batch on device: {getattr(global_var.PipelineParam, 'device', 'unknown')}")
         os.makedirs(output_dir, exist_ok=True)
-        
     except Exception:
         print(f"CRITICAL: Global pipeline initialization failed:\n{traceback.format_exc()}")
         return "FAILURE_INIT"
 
-    def process_single_task(task):
-        input_audio_path = task.get("audio_path")
-        if not input_audio_path:
-            logger.warning(f"Skipping task with missing audio_path: {task}")
-            return False
+    # ------------------------------------------------------------------
+    #  启动时的随机抖动
+    if task_batch:
+        first_audio = task_batch[0].get("audio_path")
+        if first_audio and os.path.exists(first_audio):
+            jitter_sec = calculate_smart_jitter(first_audio)
+            global_logger.info(f"⏳ Smart Jitter: Detected file {os.path.basename(first_audio)}, sleeping {jitter_sec:.2f}s...")
+            time.sleep(jitter_sec)
+    
+    success_count = 0
+    total_count = len(task_batch)
+    global_logger.info(f"🚀 Starting Batch Processing: {total_count} files (Sequential Mode)")
 
+    for i, task in enumerate(task_batch):
+        input_audio_path = task.get("audio_path")
         task_key = get_task_key(task)
+        
+        if not input_audio_path:
+            global_logger.warning(f"Skipping task with missing audio_path: {task}")
+            continue
+
+        global_logger.info(f"[{i+1}/{total_count}] Processing: {task_key}")
 
         try:
             manifest_entry = get_audio_manifest(input_audio_path, prefix_path)
-            
             safe_filename = os.path.basename(input_audio_path).replace(' ', '_')
             report_file = f"report_{safe_filename}.csv"
 
             main_process(manifest_entry, output_dir, report_file)
             
-            logger.info(f"Sub-task {task_key} processed successfully.")
+            global_logger.info(f"✅ Sub-task {task_key} SUCCESS.")
             task["pipeline_status"] = "SUCCESS"
-            return True
+            success_count += 1
 
         except Exception as e:
             error_msg = traceback.format_exc()
-            logger.error(f"Error processing sub-task {task_key} in Batch: {error_msg}")
-            
+            global_logger.error(f"❌ Error processing sub-task {task_key}: {error_msg}")
             task["pipeline_status"] = "FAILURE"
-            task["error_msg"] = str(e) 
-            return False
+            task["error_msg"] = str(e)
+            
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            time.sleep(random.uniform(0.1, 0.5))
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_task = {
-            executor.submit(process_single_task, task): task 
-            for task in task_batch
-        }
-        
-        for future in as_completed(future_to_task):
-            task = future_to_task[future]
-            try:
-                future.result() 
-            except Exception as e:
-                logger.error(f"Critical exception in thread for task {get_task_key(task)}: {e}")
-                task["pipeline_status"] = "FAILURE"
-                task["error_msg"] = str(e)
-
-    logger.info("--- All sub-tasks in Batch have been processed. ---")
+    global_logger.info(f"--- Batch Completed. Success: {success_count}/{total_count} ---")
     return "SUCCESS"

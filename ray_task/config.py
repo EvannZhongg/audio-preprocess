@@ -19,18 +19,15 @@ CONFIG_PATH = "./configs/config_for_v100.json"
 # 核心调度参数优化
 # ------------------------------------------------------------------------------
 
-# [显存安全锁]
-# 限制 Worker 内部同时处理 3 个音频
-MAX_WORKERS = 3
-# MAX_WORKERS = 2
+MAX_WORKERS = 2
 
 # [Ray 资源预留]
-# 每个 Ray Worker 占用 1 整张 GPU
-GPU_PER_TASK = 1
+# 每个 Ray Worker 占用GPU额度
+GPU_PER_TASK = 0.5
 
 # [CPU 资源预留]
-# Ray 调度时为该 Worker 预留的 CPU 总数(节点请申请10核及以上)
-CPU_PER_TASK_GPU = 10
+# 每个 Ray Worker 占用CPU额度
+CPU_PER_TASK_GPU = 5
 
 # ------------------------------------------------------------------------------
 # 内部线程分配 (总额 10 核的分配方案)
@@ -39,12 +36,11 @@ CPU_PER_TASK_GPU = 10
 
 # [FFmpeg]
 # 音频解码核心数
-CPU_PER_TASK_CPU = 2
+CPU_PER_TASK_CPU = 4
 
 # [ONNX/Torch] 
 # PyTorch/ONNX 分配核心数
 TORCH_THREAD_NUM = 1
-# TORCH_THREAD_NUM = 2
 
 # ------------------------------------------------------------------------------
 # 批处理与超时
@@ -52,12 +48,12 @@ TORCH_THREAD_NUM = 1
 
 # [超时安全线]
 # 音频多线程解码超时(支持解码约3小时音频)
-FFMPEG_TIME_OUT = 1500 
+FFMPEG_TIME_OUT = 3600 
 
 # [调度缓冲]
 # 配合 MAX_WORKERS=3，单个worker每次处理 30 个音频
 BATCH_SIZE = 30
-LONG_AUDIO_BATCH_SIZE = 9 # 对应于长音频的批次大小
+LONG_AUDIO_BATCH_SIZE = 10 # 对应于长音频的批次大小
 LONG_AUDIO_THRESHOLD = 40 * 60  
 
 # [任务队列上限]
