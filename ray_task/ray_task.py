@@ -258,7 +258,7 @@ def run():
 
     logger.info("Done.")
     save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
-    monitor.report(tasks, force_send=True)
+    # monitor.report(tasks, force_send=True)
 
 def main():
     ray.init(ignore_reinit_error=True) 
