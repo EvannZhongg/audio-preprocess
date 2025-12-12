@@ -40,7 +40,6 @@ CPU_PER_TASK_GPU = 10
 # [FFmpeg]
 # 音频解码核心数
 CPU_PER_TASK_CPU = 2
-# MAX_WORKERS = 4
 
 # [ONNX/Torch] 
 # PyTorch/ONNX 分配核心数
@@ -56,8 +55,8 @@ FFMPEG_TIME_OUT = 1200
 TIME_OUT = 6000
 
 # [调度缓冲]
-# 配合 MAX_WORKERS=3，单个worker每次处理 32 个音频
-BATCH_SIZE = 32
+# 配合 MAX_WORKERS=3，单个worker每次处理 30 个音频
+BATCH_SIZE = 30
 LONG_AUDIO_BATCH_SIZE = 9 # 长音频包含的音频数量
 
 # [任务队列上限]
