@@ -124,7 +124,8 @@ def main_process(manifest_entry, output_folder, report_path):
         logger.info("Step 3.5: Refining VAD list by speaker embedding for internal consistency.")
         inter_similarity_threshold = cfg.get("strategy_parameters", {}).get("inter_similarity_threshold", 0.7)
         refinement_batch_size = cfg.get("strategy_parameters", {}).get("refinement_batch_size", 64)
-        vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_batch_size, refinement_feature_extractor, device)
+        with _vad_lock:
+            vad_list_refined = refine_vad_list_by_embedding(vad_list_initial, audio, refinement_model, inter_similarity_threshold, refinement_batch_size, refinement_feature_extractor, device)
         update_stats(processing_stats, 'embedding_refinement', vad_list_initial, vad_list_refined)
     else:
         vad_list_refined = vad_list_initial

@@ -52,7 +52,7 @@ TORCH_THREAD_NUM = 1
 
 # [超时安全线]
 # 音频多线程解码超时(支持解码约3小时音频)
-FFMPEG_TIME_OUT = 1200 
+FFMPEG_TIME_OUT = 1500 
 
 # [调度缓冲]
 # 配合 MAX_WORKERS=3，单个worker每次处理 30 个音频
