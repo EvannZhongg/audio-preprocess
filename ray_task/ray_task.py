@@ -15,10 +15,10 @@ logger = Logger.get_logger(f"ray-task")
 
 from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_GPU,
                              DATASET_NAME, GPU_PER_TASK, LONG_AUDIO_BATCH_SIZE,
-                             MAX_AUDIO_DURATION_SECONDS, MAX_POOL_SIZE,
-                             OUTPUT_PATH, OUTPUT_ROOT_DIR, PODCAST_PATH,
-                             TASK_RESULT_BACKUP_FILE, TASK_RESULT_FILE,
-                             TIME_OUT)
+                             LONG_AUDIO_THRESHOLD, MAX_AUDIO_DURATION_SECONDS,
+                             MAX_POOL_SIZE, OUTPUT_PATH, OUTPUT_ROOT_DIR,
+                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
+                             TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
 from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
@@ -26,8 +26,7 @@ from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 # --- Global Settings ---
 # ------------------------------------------------------------------
 
-SAVE_INTERVAL_SECONDS = 3600 
-LONG_AUDIO_THRESHOLD = 30 * 60  
+SAVE_INTERVAL_SECONDS = 3600
 
 # ------------------------------------------------------------------
 # --- Progress Monitor ---
@@ -90,7 +89,7 @@ def get_task_key(task):
 # --- Worker Logic ---
 # ------------------------------------------------------------------
 
-def handle_task(config_path, task_batch, prefix_path, output_path, timeout_seconds):
+def handle_task(config_path, task_batch, prefix_path, output_path):
     successful_tasks = []
     failed_tasks = []
     
@@ -128,8 +127,8 @@ def handle_task(config_path, task_batch, prefix_path, output_path, timeout_secon
     return successful_tasks, failed_tasks
 
 @ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="SPREAD", max_retries=0)
-def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path, timeout_seconds):
-    return handle_task(config_path, task_batch, audio_prefix_path, output_path, timeout_seconds)
+def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path):
+    return handle_task(config_path, task_batch, audio_prefix_path, output_path)
 
 # ------------------------------------------------------------------
 # --- Main Loop ---
@@ -181,7 +180,7 @@ def run():
                     long_batch_buffer = long_batch_buffer[LONG_AUDIO_BATCH_SIZE:]
                     
                     for t in batch_to_send: tasks["processing"][get_task_key(t)] = t
-                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR, TIME_OUT)
+                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR)
                     result_refs.append(ref)
                     result_ref_map[ref] = batch_to_send
 
@@ -192,7 +191,7 @@ def run():
                     short_batch_buffer = short_batch_buffer[BATCH_SIZE:]
                     
                     for t in batch_to_send: tasks["processing"][get_task_key(t)] = t
-                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR, TIME_OUT)
+                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR)
                     result_refs.append(ref)
                     result_ref_map[ref] = batch_to_send
             
@@ -200,17 +199,17 @@ def run():
         
         # --- Tail Flushing ---
         if not task_queue and len(result_refs) < MAX_POOL_SIZE:
-            # 只有在队列彻底空了之后，才发送不满 3 个的残余长音频
+            # 队列彻底为空, 发送残余长音频
             if long_batch_buffer:
                 for t in long_batch_buffer: tasks["processing"][get_task_key(t)] = t
-                ref = handle_task_ray_gpu.remote(CONFIG_PATH, long_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR, TIME_OUT)
+                ref = handle_task_ray_gpu.remote(CONFIG_PATH, long_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR)
                 result_refs.append(ref)
                 result_ref_map[ref] = long_batch_buffer
                 long_batch_buffer = []
             
             if short_batch_buffer:
                 for t in short_batch_buffer: tasks["processing"][get_task_key(t)] = t
-                ref = handle_task_ray_gpu.remote(CONFIG_PATH, short_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR, TIME_OUT)
+                ref = handle_task_ray_gpu.remote(CONFIG_PATH, short_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR)
                 result_refs.append(ref)
                 result_ref_map[ref] = short_batch_buffer
                 short_batch_buffer = []
@@ -254,11 +253,11 @@ def run():
             logger.info("Auto-saving...")
             save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
             last_save_time = current_time
-            # monitor.report(tasks, force_send=True)
+            monitor.report(tasks, force_send=True)
 
     logger.info("Done.")
     save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
-    # monitor.report(tasks, force_send=True)
+    monitor.report(tasks, force_send=True)
 
 def main():
     ray.init(ignore_reinit_error=True) 
@@ -268,4 +267,5 @@ def main():
         logger.error(f"Main Crashed: {traceback.format_exc()}")
 
 if __name__ == '__main__':
+    main()
     main()
