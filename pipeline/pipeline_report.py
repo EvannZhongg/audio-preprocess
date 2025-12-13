@@ -11,24 +11,27 @@ def append_to_report(report_path, rel_path, file_path, initial_duration, final_d
     retention_rate = (final_duration / initial_duration) * 100 if initial_duration > 0 else 0
     retention_rate = min(100.0, retention_rate)
 
-    with open(report_path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not file_exists:
+    try:
+        with open(report_path, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow([
+                    "RelativePath", 
+                    "FilePath",
+                    "InitialDuration(s)", 
+                    "FinalDuration(s)", 
+                    "RetentionRate(%)"
+                ])
+            
             writer.writerow([
-                "RelativePath", 
-                "FilePath",
-                "InitialDuration(s)", 
-                "FinalDuration(s)", 
-                "RetentionRate(%)"
+                rel_path, 
+                file_path,
+                f"{initial_duration:.2f}", 
+                f"{final_duration:.2f}", 
+                f"{retention_rate:.2f}"
             ])
-        
-        writer.writerow([
-            rel_path, 
-            file_path,
-            f"{initial_duration:.2f}", 
-            f"{final_duration:.2f}", 
-            f"{retention_rate:.2f}"
-        ])
+    except Exception as e:
+        print(f"Failed to write to report csv: {e}")
 
 
 def update_stats(stats, step_name, list_before, list_after):
@@ -64,20 +67,23 @@ def print_processing_summary(stats, audio_name):
         return
     
     for step_name, data in stats['steps'].items():
-        discarded_count = data['discarded_count']
-        if discarded_count > 0:
+        discarded_count = data.get('discarded_count', 0)
+        discarded_duration = data.get('discarded_duration', 0.0)
+
+        if discarded_count > 0 or discarded_duration > 0.001:
             if initial_duration > 0:
                 percentage_dropped = (discarded_duration / initial_duration) * 100
             else:
                 percentage_dropped = 0.0
             logger.info(
                 f" > Dropped by {step_name}: {discarded_count} segments "
-                f"({data['discarded_duration']:.2f}s) - {percentage_dropped:.2f}% of initial."
+                f"({discarded_duration:.2f}s) - {percentage_dropped:.2f}% of initial."
             )
 
     final_count = stats['final']['count']
     final_duration = stats['final']['duration']
-    retention_rate_count = (final_count / initial_count) * 100
+    
+    retention_rate_count = (final_count / initial_count) * 100 if initial_count > 0 else 0
     retention_rate_duration = (final_duration / initial_duration) * 100 if initial_duration > 0 else 0
     retention_rate_duration = min(100.0, retention_rate_duration)
 
