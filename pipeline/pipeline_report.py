@@ -59,11 +59,17 @@ def print_processing_summary(stats, audio_name):
         return
 
     logger.info(f"Initial: {initial_count} segments, {initial_duration:.2f}s total duration.")
+    if initial_duration <= 0.001:
+        logger.warning(f"Initial duration is zero (No speech detected). Skipping stats calculation.")
+        return
     
     for step_name, data in stats['steps'].items():
         discarded_count = data['discarded_count']
         if discarded_count > 0:
-            percentage_dropped = (data['discarded_duration'] / initial_duration) * 100
+            if initial_duration > 0:
+                percentage_dropped = (discarded_duration / initial_duration) * 100
+            else:
+                percentage_dropped = 0.0
             logger.info(
                 f" > Dropped by {step_name}: {discarded_count} segments "
                 f"({data['discarded_duration']:.2f}s) - {percentage_dropped:.2f}% of initial."
