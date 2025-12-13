@@ -150,6 +150,7 @@ def main_process(manifest_entry, output_folder, report_path):
     logger.info("Step 3: Fine-grained Segmentation by VAD")
     vad_list_initial = vad_model.vad(diarize_df, audio)
     processing_stats['initial']['count'] = len(vad_list_initial)
+    processing_stats['initial']['duration'] = sum(s["end"] - s["start"] for s in vad_list_initial)
     
     # Step 3.5: Refinement
     if cfg.get("embedding_refinement", {}).get("enable", True) and refinement_model:
