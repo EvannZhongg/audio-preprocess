@@ -57,7 +57,7 @@ LONG_AUDIO_BATCH_SIZE = 10 # 对应于长音频的批次大小
 LONG_AUDIO_THRESHOLD = 40 * 60  
 
 # [任务队列上限]
-MAX_POOL_SIZE = 60
+MAX_POOL_SIZE = 100
 
 
 # [OOM 熔断]
