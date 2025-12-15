@@ -3,6 +3,7 @@ import json
 import os
 import re
 from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -17,6 +18,7 @@ from pipeline.vad_process import (cut_by_speaker_label,
                                   refine_vad_list_by_embedding)
 from utils.meta_info_config import MetaConfig
 from utils.tool import export_to_metadata, get_short_hash
+
 
 # ==============================================================================
 # 显存安全清理与诊断

@@ -1,12 +1,28 @@
 import os
-import threading
-import traceback
+import shutil
+import sys
+
+LARGE_TEMP_PATH = "/home/oicq/audio_preprocess/TEMP" 
+
+try:
+    os.makedirs(LARGE_TEMP_PATH, exist_ok=True)
+    os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
+    # 覆盖系统默认临时目录，防止 soundfile/ffmpeg 写爆 /tmp
+    os.environ["TMPDIR"] = LARGE_TEMP_PATH
+    os.environ["TEMP"] = LARGE_TEMP_PATH
+    os.environ["TMP"] = LARGE_TEMP_PATH
+except Exception as e:
+    print(f"Failed to set large temp dir: {e}")
+
 import gc
-import torch
-import time
-import random 
-from dataclasses import dataclass
 import logging
+import random
+import threading
+import time
+import traceback
+from dataclasses import dataclass
+
+import torch
 
 from pipeline import global_var
 from pipeline.main_process import main_process
@@ -75,12 +91,12 @@ def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_d
         global_logger = getattr(global_var.PipelineParam, 'logger', logger)
         global_logger.info(f"Processing batch on device: {getattr(global_var.PipelineParam, 'device', 'unknown')}")
         os.makedirs(output_dir, exist_ok=True)
+        
     except Exception:
         print(f"CRITICAL: Global pipeline initialization failed:\n{traceback.format_exc()}")
         return "FAILURE_INIT"
 
-    # ------------------------------------------------------------------
-    #  启动时的随机抖动
+    #  启动时的随机抖动 (防止并发冲击 CFS)
     if task_batch:
         first_audio = task_batch[0].get("audio_path")
         if first_audio and os.path.exists(first_audio):
@@ -107,6 +123,7 @@ def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_d
             safe_filename = os.path.basename(input_audio_path).replace(' ', '_')
             report_file = f"report_{safe_filename}.csv"
 
+            # 核心处理流程
             main_process(manifest_entry, output_dir, report_file)
             
             global_logger.info(f"✅ Sub-task {task_key} SUCCESS.")

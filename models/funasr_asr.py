@@ -21,6 +21,7 @@ class FunASR:
     """
     ASR class using FunASR models (Optimized for Memory Stability).
     Fixed: GPU Memory Leak via manual GC and Mini-batching.
+    Fixed: System Error due to /tmp full by allowing custom temp directory.
     """
 
     def __init__(self, asr_model: str, model_dir: str, vad_model_dir: str, device: str, punc_model_dir: str = 'ct-punc-c', **kwargs):
@@ -79,6 +80,7 @@ class FunASR:
     def batch_recognize_via_tempfile(self, audio: np.ndarray, vad_segments: List[dict], sample_rate: int = 16000):
         """
         Batch transcribe with explicit chunking and memory cleanup.
+        Uses LARGE_TEMP_DIR env var if set to avoid /tmp overflow.
         """
         if not vad_segments:
             return [""] * len(vad_segments)
@@ -86,8 +88,16 @@ class FunASR:
         non_empty_segment_indices = [] 
         input_file_paths = []
 
-        # 创建临时目录
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # 优先使用环境变量指定的临时目录
+        custom_temp_dir = os.environ.get("LARGE_TEMP_DIR", None)
+        if custom_temp_dir:
+            try:
+                os.makedirs(custom_temp_dir, exist_ok=True)
+            except Exception as e:
+                logger.warning(f"Could not create LARGE_TEMP_DIR '{custom_temp_dir}', falling back to system default: {e}")
+                custom_temp_dir = None
+
+        with tempfile.TemporaryDirectory(dir=custom_temp_dir) as temp_dir:
             for idx, segment_info in enumerate(vad_segments):
                 start_frame = int(segment_info["start"] * sample_rate)
                 end_frame = int(segment_info["end"] * sample_rate)
@@ -97,7 +107,11 @@ class FunASR:
                     continue
                         
                 temp_audio_file_path = os.path.join(temp_dir, f"{idx}.wav")
-                sf.write(temp_audio_file_path, segment_audio, sample_rate)
+                try:
+                    sf.write(temp_audio_file_path, segment_audio, sample_rate)
+                except Exception as e:
+                    logger.critical(f"Failed to write temp audio file to {temp_audio_file_path}. Disk full or Inode exhausted? Error: {e}")
+                    raise e
                 
                 non_empty_segment_indices.append(idx)
                 input_file_paths.append(temp_audio_file_path)
@@ -116,13 +130,11 @@ class FunASR:
                 try:
                     with torch.no_grad():
                         if self.asr_model == "ParaFormer":
-                            # 为当前 Batch 创建一个 scp 文件
                             batch_scp_path = os.path.join(temp_dir, f"filelist_batch_{i}.scp")
                             with open(batch_scp_path, 'w') as f:
                                 for path in batch_paths:
                                     f.write(f"{path}\n")
                             
-                            # 调用推理
                             res = self.model(input=batch_scp_path, batch_size=batch_size)
                             batch_results_chunk = res if isinstance(res, list) else [res]
                             

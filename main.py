@@ -1,3 +1,16 @@
+import os
+
+LARGE_TEMP_PATH = f"{os.getcwd()}/TEMP" 
+
+try:
+    os.makedirs(LARGE_TEMP_PATH, exist_ok=True)
+    os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
+    os.environ["TMPDIR"] = LARGE_TEMP_PATH
+    os.environ["TEMP"] = LARGE_TEMP_PATH
+    os.environ["TMP"] = LARGE_TEMP_PATH
+except Exception as e:
+    print(f"Failed to set large temp dir: {e}")
+
 import csv
 import sys
 import warnings
