@@ -2,10 +2,21 @@ FROM rayproject/ray:2.48.0.2c63f6-py39-gpu
 USER root
 
 RUN apt-get update
-RUN apt-get install -y vim net-tools lrzsz sox libsox-dev curl
+RUN apt-get update && apt-get install -y \
+    vim \
+    net-tools \
+    lrzsz \
+    sox \
+    libsox-dev \
+    build-essential \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN conda create -y -n AudioPipeline python=3.9
-RUN conda install -n AudioPipeline ffmpeg -y
+RUN conda create -y -n AudioPipeline python=3.9 && \
+    conda install -n AudioPipeline -y -c conda-forge \
+    ffmpeg \
+    hdbscan
+   
 RUN conda install -n AudioPipeline pytorch=2.5.0 torchvision=0.20.0 torchaudio=2.5.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
 RUN mkdir -p /home/oicq/audio_preprocess
