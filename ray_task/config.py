@@ -48,13 +48,16 @@ TORCH_THREAD_NUM = 1
 
 # [超时安全线]
 # 音频多线程解码超时(支持解码约3小时音频)
-FFMPEG_TIME_OUT = 3600 
+FFMPEG_TIME_OUT = 200
 
 # [调度缓冲]
-# 配合 MAX_WORKERS=3，单个worker每次处理 30 个音频
-BATCH_SIZE = 30
-LONG_AUDIO_BATCH_SIZE = 10 # 对应于长音频的批次大小
+BATCH_SIZE = 20
+LONG_AUDIO_BATCH_SIZE = 6 # 对应于长音频的批次大小
 LONG_AUDIO_THRESHOLD = 40 * 60  
+
+# BATCH_SIZE = 30
+# LONG_AUDIO_BATCH_SIZE = 10 # 对应于长音频的批次大小
+# LONG_AUDIO_THRESHOLD = 30 * 60  
 
 # [任务队列上限]
 MAX_POOL_SIZE = 100

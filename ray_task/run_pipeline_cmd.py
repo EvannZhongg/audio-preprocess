@@ -13,6 +13,23 @@ try:
     os.environ["TMP"] = LARGE_TEMP_PATH
 except Exception as e:
     print(f"Failed to set large temp dir: {e}")
+    
+    
+def protect_raylet():
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write("800")
+            
+        with open("/proc/self/oom_score_adj", "r") as f:
+            current_score = f.read().strip()
+            
+        if int(current_score) == 800:
+            print(f"[OOM Protection] SUCCESS: oom_score_adj set to {current_score}. Worker will die first.")
+        else:
+            print(f"[OOM Protection] FAILED: Tried to set 800, but value is {current_score}.")
+            
+    except Exception as e:
+        print(f"[OOM Protection] ERROR: Could not write to /proc: {e}")
 
 import gc
 import logging
@@ -68,17 +85,19 @@ def _ensure_pipeline_initialized(config_path):
 def calculate_smart_jitter(file_path):
     """
     根据文件大小计算合理的抖动时间。
-    避免对短音频等待过久，同时确保长音频能有效错峰。
+    长文件需要更长的错峰时间，防止两个大文件同时加载导致 IO/内存 双爆。
     """
     try:
         size_bytes = os.path.getsize(file_path)
         size_mb = size_bytes / (1024 * 1024)
-        if size_mb > 200:
-            return random.uniform(15, 40) 
         
+        # [优化] 针对超大文件 (>500MB, 约2-3小时) 增加更长的等待
+        if size_mb > 500:
+             return random.uniform(20, 60)
+        elif size_mb > 200:
+            return random.uniform(15, 40) 
         elif size_mb > 50:
             return random.uniform(5, 15)
-            
         else:
             return random.uniform(1, 4)
             
@@ -86,6 +105,9 @@ def calculate_smart_jitter(file_path):
         return random.uniform(1, 3)
 
 def run_audio_preprocess_pipeline(config_path, task_batch, prefix_path, output_dir):
+    
+    # 启动自我内存保护
+    protect_raylet()
     try:
         _ensure_pipeline_initialized(config_path)
         global_logger = getattr(global_var.PipelineParam, 'logger', logger)
