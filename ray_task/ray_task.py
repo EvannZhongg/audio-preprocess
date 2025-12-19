@@ -82,8 +82,10 @@ def save_tasks(tasks, main_file_path, backup_file_path=None):
     if backup_file_path:
         shutil.copy(main_file_path, backup_file_path)
 
+
 def get_task_key(task):
-    return task["relative_path"]
+    filename = os.path.basename(task["audio_path"])
+    return f"{task['relative_path']}/{filename}"
 
 # ------------------------------------------------------------------
 # --- Worker Logic ---
@@ -260,7 +262,7 @@ def run():
     monitor.report(tasks, force_send=True)
 
 def main():
-    ray.init(ignore_reinit_error=True) 
+    ray.init(address="127.0.0.1:6379", ignore_reinit_error=True) 
     try:
         run()
     except Exception:
