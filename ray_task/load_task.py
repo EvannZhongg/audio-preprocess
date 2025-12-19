@@ -15,10 +15,9 @@ def load_tasks(file_path):
     loaded = False
 
     # ==============================================================================
-    # 1. 加载文件 (主文件 -> 备份文件 -> 失败则初始化)
+    # 1. 加载历史记录 (主文件 -> 备份文件)
     # ==============================================================================
     
-    # 尝试加载主文件
     if os.path.exists(file_path):
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -27,7 +26,6 @@ def load_tasks(file_path):
         except json.JSONDecodeError:
             logger.warning(f"⚠️ Main task file is corrupted: {file_path}")
     
-    # 尝试加载备份文件
     if not loaded and os.path.exists(TASK_RESULT_BACKUP_FILE):
         try:
             logger.info(f"🔄 Attempting to restore from backup: {TASK_RESULT_BACKUP_FILE}")
@@ -36,49 +34,69 @@ def load_tasks(file_path):
             shutil.copy(TASK_RESULT_BACKUP_FILE, file_path)
             loaded = True
             logger.info("✅ Restored from backup successfully.")
-        except Exception as e:
-            logger.error(f"❌ Backup file is also corrupted: {e}")
+        except Exception:
+            logger.error("❌ Backup file is also corrupted or missing.")
 
     # ==============================================================================
-    # 2. 状态恢复与清理 (Re-queue Processing)
+    # 2. 结构初始化 (兼容首次运行)
     # ==============================================================================
-
-    if loaded:
-        # 确保基本结构存在
-        for key in ['todo', 'complete', 'failed', 'processing']:
-            if key not in tasks: tasks[key] = [] if key != 'processing' else {}
-
-        # A. 把上次中断的 'processing' 任务全部扔回 'todo'
-        if tasks.get("processing"):
-            interrupted_tasks = tasks["processing"]
-            logger.info(f"⚠️ Found {len(interrupted_tasks)} interrupted tasks. Re-queueing...")
-            
-            for k, task_info in interrupted_tasks.items():
-                # 清理脏目录
-                try:
-                    relative_path = task_info.get("relative_path")
-                    audio_path = task_info.get("audio_path")
-                    if relative_path and audio_path:
-                        fid = re.sub(r"['\"\s]", "", Path(audio_path).stem)
-                        processing_dir = os.path.join(OUTPUT_ROOT_DIR, relative_path, fid)
-                        if os.path.exists(processing_dir):
-                            shutil.rmtree(processing_dir)
-                except Exception:
-                    pass
-                
-                # 放回待办列表
-                tasks['todo'].append(task_info)
-            
-            tasks["processing"] = {} # 清空进行中状态
-
-    # ==============================================================================
-    # 3. [关键] 账目核对与补全 (Sync with Manifest)
-    # ==============================================================================
-    # 解决 "todo" 为空但任务没跑完的问题
+    # 无论是否加载成功，都必须确保字典结构完整，防止 KeyError
     
-    logger.info("🔄 Syncing with original manifest to ensure no tasks are lost...")
+    keys_to_ensure = ['todo', 'complete', 'failed', 'processing']
+    for key in keys_to_ensure:
+        if key not in tasks:
+            # processing 是字典，其他是列表
+            tasks[key] = {} if key == 'processing' else []
+
+    # 如果是第一次运行，或者文件全坏了，初始化统计数据
+    if not loaded:
+        logger.info("🆕 No history found (First Run). Initializing structure...")
+        tasks['total_num'] = 0
+        tasks['total_hour'] = 0
+        tasks['complete_num'] = 0
+        tasks['complete_total_hour'] = 0
+        tasks['failed_num'] = 0
+        tasks['failed_total_hour'] = 0
+
+    # ==============================================================================
+    # 3. 状态恢复 (把中断的任务捞回来)
+    # ==============================================================================
+
+    if tasks.get("processing"):
+        interrupted_tasks = tasks["processing"]
+        logger.info(f"⚠️ Found {len(interrupted_tasks)} interrupted tasks. Re-queueing...")
+        
+        for k, task_info in interrupted_tasks.items():
+            # 清理脏目录
+            try:
+                relative_path = task_info.get("relative_path")
+                audio_path = task_info.get("audio_path")
+                if relative_path and audio_path:
+                    fid = re.sub(r"['\"\s]", "", Path(audio_path).stem)
+                    processing_dir = os.path.join(OUTPUT_ROOT_DIR, relative_path, fid)
+                    if os.path.exists(processing_dir):
+                        shutil.rmtree(processing_dir)
+            except Exception:
+                pass
+            
+            # 放回待办列表
+            tasks['todo'].append(task_info)
+        
+        tasks["processing"] = {} # 清空进行中状态
+
+    # ==============================================================================
+    # 4. [全能同步] 账目核对与任务生成 (Sync)
+    # ==============================================================================
+    # 第一次运行时：这里会读取 manifest 并生成所有任务放入 todo
+    # 断点续传时：这里会检查是否有新文件，或者找回丢失的任务
+    
+    logger.info("🔄 Syncing with original manifest...")
     
     try:
+        if not os.path.exists(PODCAST_DATA_FILE):
+             # 如果连原始数据都没有，抛出异常
+             raise FileNotFoundError(f"Source data file missing: {PODCAST_DATA_FILE}")
+
         with open(PODCAST_DATA_FILE, 'r', encoding='utf-8') as f:
             raw_data = json.load(f)
             all_podcasts = raw_data.get('podcast_data', [])
@@ -87,25 +105,19 @@ def load_tasks(file_path):
         all_podcasts = []
 
     if all_podcasts:
-        # 建立已存在任务的索引 (使用 relative_path 作为唯一键)
-        # 注意：这里我们只关心 relative_path 就能区分任务
+        # 建立索引，避免重复添加
         existing_paths = set()
         
-        # 记录已完成的
-        for t in tasks.get('complete', []): existing_paths.add(t['relative_path'])
-        # 记录失败的
-        for t in tasks.get('failed', []): existing_paths.add(t['relative_path'])
-        # 记录已经在 todo 里的
-        for t in tasks.get('todo', []): existing_paths.add(t['relative_path'])
+        for t in tasks['complete']: existing_paths.add(t['relative_path'])
+        for t in tasks['failed']: existing_paths.add(t['relative_path'])
+        for t in tasks['todo']: existing_paths.add(t['relative_path'])
         
-        recovered_count = 0
-        new_todo = []
+        added_count = 0
         
-        # 遍历原始总表
         for podcast in all_podcasts:
             r_path = podcast['relative_path']
             
-            # 如果这个任务不在 (完成 + 失败 + 待办) 里，说明它丢了
+            # 只要不在 (完成/失败/待办) 里，就加进去
             if r_path not in existing_paths:
                 task_item = {
                     "relative_path": r_path,
@@ -113,20 +125,16 @@ def load_tasks(file_path):
                     "audio_duration_second": podcast['audio_duration_second']
                 }
                 tasks['todo'].append(task_item)
-                existing_paths.add(r_path) # 防止重复添加
-                recovered_count += 1
+                existing_paths.add(r_path)
+                added_count += 1
 
-        if recovered_count > 0:
-            logger.info(f"✨ Recovered {recovered_count} tasks that were missing from JSON!")
+        if added_count > 0:
+            logger.info(f"✨ Added {added_count} tasks (First run or Recovery).")
         else:
-            logger.info("✅ Verification complete. No missing tasks found.")
+            logger.info("✅ All tasks are accounted for.")
 
-        # 更新统计数据
+        # 更新总统计
         tasks['total_num'] = len(all_podcasts)
         tasks['total_hour'] = sum(ep['audio_duration_second'] for ep in all_podcasts) / 3600
-        
-        # 可选：重新清洗 todo 格式
-        cleaned_todo = [t for t in tasks['todo'] if isinstance(t, dict) and "relative_path" in t]
-        tasks['todo'] = cleaned_todo
 
     return tasks
