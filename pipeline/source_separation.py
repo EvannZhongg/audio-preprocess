@@ -1,10 +1,8 @@
 import librosa
-
-from utils.logger import time_logger
+import numpy as np
+import traceback
 from models import smru_separate
-from pipeline.global_var import PipelineParam
-
-logger = PipelineParam.logger
+from utils.logger import time_logger
 
 
 @time_logger
@@ -19,6 +17,8 @@ def source_separation(predictor, audio):
     Returns:
         dict: A dictionary containing the separated vocals and updated audio waveform.
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
 
     mix, rate = None, None
 
@@ -33,16 +33,51 @@ def source_separation(predictor, audio):
     # We will check the type of the predictor to handle this.
     if isinstance(predictor, smru_separate.Predictor):
         # SMRU model handles resampling internally and returns a different tuple.
-        vocals, no_vocals = predictor.predict(mix)
+        try:
+            vocals, no_vocals = predictor.predict(mix)
+            
+        except RuntimeError as e:
+            err_msg = str(e)
+            if "istft" in err_msg or "window overlap" in err_msg or "CUDA" in err_msg:
+                logger.warning(f"SMRU ISTFT Error detected: {err_msg}")
+                logger.warning("Fallback: Skipping separation, using original audio as vocals.")
+                
+                if mix.ndim == 2:
+                    vocals = mix.T  # (C, T) -> (T, C)
+                else:
+                    # 如果是单声道 (T,) -> (T, 1)
+                    vocals = mix[:, np.newaxis]
+            else:
+                raise e
+        
+        except Exception as e:
+            logger.error(f"SMRU Unknown Error: {traceback.format_exc()}")
+            logger.warning("Fallback: Using original audio.")
+            if mix.ndim == 2:
+                vocals = mix.T
+            else:
+                vocals = mix[:, np.newaxis]
     else:
         # Original UVR model
         vocals, no_vocals = predictor.predict(mix)
 
+    # Safety check for dimensions
+    if vocals.ndim == 1:
+        vocals = vocals[:, np.newaxis]
 
-    # convert vocals back to previous sample rate
     logger.debug(f"vocals shape before resample: {vocals.shape}")
-    vocals = librosa.resample(vocals.T, orig_sr=44100, target_sr=rate).T
+    
+    try:
+        # librosa.resample expects (Channels, Time), so we transpose .T
+        vocals = librosa.resample(vocals.T, orig_sr=44100, target_sr=rate).T
+    except Exception as e:
+        logger.error(f"Resampling failed: {e}. Fallback to original.")
+        # Final fallback if resampling fails
+        return audio
+
     logger.debug(f"vocals shape after resample: {vocals.shape}")
-    audio["waveform"] = vocals[:, 0]  # vocals is stereo, only use one channel
+    
+    # Update audio with the first channel of vocals
+    audio["waveform"] = vocals[:, 0]
 
     return audio

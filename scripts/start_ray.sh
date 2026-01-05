@@ -1,7 +1,6 @@
 #!/bin/bash
-
-# ray start --head --port=6379 --num-cpus=0
-# ray start --address=11.177.169.159:6379
+# ray start --head --port=6379 --object-store-memory=2147483648 --num-cpus=0
+# ray start --address=11.177.169.159:6379 --object-store-memory=2147483648
 # nohup python run_ray_task.py > /dev/null 2>&1 &
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

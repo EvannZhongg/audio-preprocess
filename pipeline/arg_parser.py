@@ -39,7 +39,7 @@ def get_cmd_args():
         help="Path to the processing report CSV file for resuming progress.",
     )
     parser.add_argument(
-        "--config_path", type=str, default="config.json", help="config path"
+        "--config_path", type=str, default="./configs/config.json", help="config path"
     )
     parser.add_argument("--batch_size", type=int, default=8, help="batch size")
     parser.add_argument(
@@ -47,12 +47,6 @@ def get_cmd_args():
         type=str,
         default="float16",
         help="The compute type to use for the model",
-    )
-    parser.add_argument(
-        "--whisper_arch",
-        type=str,
-        default="medium",
-        help="The name of the Whisper model to load.",
     )
     parser.add_argument(
         "--threads",

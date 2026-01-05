@@ -1,205 +1,272 @@
-import sys
-import ray
 import json
-import traceback
 import os
-import time
+import random
 import shutil
+import time
+import traceback
+from collections import deque
+
+import ray
 
 from utils import msg_bot
-
 from utils.logger import Logger
+
 logger = Logger.get_logger(f"ray-task")
 
-from ray_task.config import OUTPUT_PATH, PODCAST_PATH, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE
-from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
+from ray_task.config import (BATCH_SIZE, CONFIG_PATH, CPU_PER_TASK_GPU,
+                             DATASET_NAME, GPU_PER_TASK, LONG_AUDIO_BATCH_SIZE,
+                             LONG_AUDIO_THRESHOLD, MAX_AUDIO_DURATION_SECONDS,
+                             MAX_POOL_SIZE, OUTPUT_PATH, OUTPUT_ROOT_DIR,
+                             PODCAST_PATH, TASK_RESULT_BACKUP_FILE,
+                             TASK_RESULT_FILE)
 from ray_task.load_task import load_tasks
-from ray_task.podcast_sort import sort_podcast_todo_tasks
+from ray_task.run_pipeline_cmd import run_audio_preprocess_pipeline
 
-ray.init(ignore_reinit_error=True)
+# ------------------------------------------------------------------
+# --- Global Settings ---
+# ------------------------------------------------------------------
 
-def get_ray_total_cpu():
-    nodes = ray.nodes()
-    total_cpus = sum(node['Resources'].get('CPU', 0) for node in nodes)
-    return total_cpus
+SAVE_INTERVAL_SECONDS = 3600
 
-def get_ray_available_gpu():
-    available_resources = ray.available_resources()
-    available_gpus = available_resources.get('GPU', 0)
-    return available_gpus
+# ------------------------------------------------------------------
+# --- Progress Monitor ---
+# ------------------------------------------------------------------
 
-def save_tasks(file_path, backup_file_path, data):
-    with open(backup_file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-    
-    shutil.move(backup_file_path, file_path)
+class ProgressMonitor:
+    def __init__(self, dataset_name, report_interval=3*3600):
+        self.dataset_name = dataset_name
+        self.report_interval = report_interval
+        self.last_send_time = 0
+        
+    def report(self, tasks, force_send=False):
+        total_h = tasks.get("total_hour", 0)
+        success_h = tasks.get("complete_total_hour", 0)
+        failed_h = tasks.get("failed_total_hour", 0)
+        processed_h = success_h + failed_h
+        
+        percent = (processed_h / total_h * 100) if total_h > 0 else 0
+        
+        is_finished = percent >= 99.99
+        time_due = (time.time() - self.last_send_time) > self.report_interval
+        
+        if time_due or is_finished or force_send:
+            self._send_bot(percent, success_h, failed_h, total_h)
+            self.last_send_time = time.time()
+        
+        logger.debug(f"[{percent:5.2f}%] Done:{success_h:.1f}h | Fail:{failed_h:.1f}h")
+
+    def _send_bot(self, percent, success_h, failed_h, total_h):
+        msg = (f"{self.dataset_name}: Progress {percent:.2f}% | "
+               f"Done: {int(success_h)}h | Failed: {int(failed_h)}h | Total: {total_h:.1f}h")
+        try:
+            msg_bot.send_msg(msg)
+        except:
+            pass
+
+# ------------------------------------------------------------------
+# --- Utilities ---
+# ------------------------------------------------------------------
+
+def save_tasks(tasks, main_file_path, backup_file_path=None):
+    if isinstance(tasks.get('todo'), deque):
+        tasks_dict = {k: v for k, v in tasks.items() if k != 'todo'}
+        tasks_dict['todo'] = list(tasks['todo'])
+    else:
+        tasks_dict = tasks
+
+    temp_file = main_file_path + ".tmp"
+    with open(temp_file, 'w', encoding='utf-8') as f:
+        json.dump(tasks_dict, f, indent=2, ensure_ascii=False) 
+        
+    shutil.move(temp_file, main_file_path)
+    if backup_file_path:
+        shutil.copy(main_file_path, backup_file_path)
+
 
 def get_task_key(task):
-    task_key = task["podcast_name"] + "/" + task["episode_name"]
-    return task_key
+    filename = os.path.basename(task["audio_path"])
+    return f"{task['relative_path']}/{filename}"
 
-def handle_task(task, prefix_path, output_path):
-    """
-    task
-    {
-        "podcast_name": "xx",
-        "episode_name": "xx",
-        "audio_duration_second": 0 
-    }
-    """
+# ------------------------------------------------------------------
+# --- Worker Logic ---
+# ------------------------------------------------------------------
+
+def handle_task(config_path, task_batch, prefix_path, output_path):
+    successful_tasks = []
+    failed_tasks = []
+    
+    # [Jitter] 作用于 Worker 进程启动时
+    time.sleep(random.uniform(2, 8))
+
+    if not task_batch:
+        return [], []
 
     try:
-        podcast_name = task["podcast_name"]
-        episode_name = task["episode_name"]
-        input_audio_path = f"{prefix_path}/{podcast_name}/{episode_name}"
+        # [Pipeline 调用]
+        batch_status = run_audio_preprocess_pipeline(
+            config_path, 
+            task_batch, 
+            prefix_path, 
+            output_path
+        )
+        
+        if batch_status != "SUCCESS":
+            logger.error(f"Batch failed with status: {batch_status}")
+            return [], task_batch 
 
-        task_key = get_task_key(task)
-        ret = run_audio_preprocess_pipeline(input_audio_path, output_path, task_key)
-        # logger.debug(f"handle task={task} ret={ret}")
-        return ret, task
     except Exception as e:
-        logger.error(f"handle task={task} error {traceback.format_exc()}")
-        return "EXCEPTION", task
+        logger.error(f"Handle Batch Exception: {traceback.format_exc()}")
+        return [], task_batch
 
-@ray.remote(num_cpus=4, max_retries=0)
-def handle_task_ray_cpu(task, audio_prefix_path, output_path):
-    return handle_task(task, audio_prefix_path, output_path)
+    for task in task_batch:
+        task_status = task.get("pipeline_status", "UNKNOWN")
+        if task_status == "SUCCESS":
+            successful_tasks.append(task)
+        else:
+            logger.warning(f"Task {get_task_key(task)} failed: {task_status}")
+            failed_tasks.append(task)
+            
+    return successful_tasks, failed_tasks
 
-# 目前gpu用的T4，一卡一任务
-@ray.remote(num_cpus=4, num_gpus=1, max_retries=0)
-def handle_task_ray_gpu(task, audio_prefix_path, output_path):
-    return handle_task(task, audio_prefix_path, output_path)
+@ray.remote(num_cpus=CPU_PER_TASK_GPU, num_gpus=GPU_PER_TASK, scheduling_strategy="SPREAD", max_calls=1, max_retries=0)
+def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path):
+    return handle_task(config_path, task_batch, audio_prefix_path, output_path)
 
-def get_optimal_task_function():
-    """根据可用资源返回最优的任务函数"""
-    available_gpus = get_ray_available_gpu()
-    if available_gpus >= 0.5:
-        return handle_task_ray_gpu
-    else:
-        return handle_task_ray_cpu
-
-
-last_send_bot_msg = time.time()
-def print_progress(tasks):
-    global last_send_bot_msg
-    total_hour = tasks["total_hour"]
-    handled_hour = tasks["complete_total_hour"]
-    log_str = f"audio-pipeline handled_hour/total_hour={round(handled_hour, 2)}/{round(total_hour, 2)}"
-    logger.debug(log_str)
-    if time.time() - last_send_bot_msg > 3600 * 6:
-        last_send_bot_msg = time.time()
-        msg_bot.send_msg(log_str)
-
-
-def check_dirty_data(task):
-    podcast_name = task["podcast_name"]
-    episode_name = os.path.splitext(os.path.basename(task["episode_name"]))[0]
-    cur_task_dir = f"{OUTPUT_PATH}/{podcast_name}/{episode_name}"
-    if os.path.exists(cur_task_dir):
-        logger.error(f"unexcepted dir {cur_task_dir}")
-        sys.exit(1)
-
+# ------------------------------------------------------------------
+# --- Main Loop ---
+# ------------------------------------------------------------------
 
 def run():
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
     tasks = load_tasks(TASK_RESULT_FILE)
+    
+    # [排序] 短任务优先。
+    if isinstance(tasks['todo'], list):
+        tasks['todo'].sort(key=lambda x: x['audio_duration_second'])
+    
+    task_queue = deque(tasks['todo'])
+    tasks['todo'] = task_queue
 
+    monitor = ProgressMonitor(DATASET_NAME)
+    
     result_refs = []
     result_ref_map = {}
-    while tasks['todo']:
-        sort_podcast_todo_tasks(tasks['todo'])
+    last_save_time = time.time()
 
-        need_delete_task_key = []
+    logger.info(f"🚀 Cluster Job Started. Nodes: Batch Strategy: Mixed.")
 
-        # logger.debug(f"all tasks {tasks}")
+    short_batch_buffer = [] 
+    long_batch_buffer = []
 
-        for task in tasks['todo']:
-            # save processing data
+    while task_queue or result_refs or short_batch_buffer or long_batch_buffer:
+        
+        # --- Submission ---
+        while len(result_refs) < MAX_POOL_SIZE and task_queue:
+            task = task_queue.popleft()
             task_key = get_task_key(task)
-            if task_key in tasks["processing"]:
+            duration = task["audio_duration_second"]
+
+            if task_key in tasks["processing"]: continue
+            if duration < 10: continue
+            if duration > MAX_AUDIO_DURATION_SECONDS: 
+                tasks['failed'].append(task)
                 continue
 
-            if task["audio_duration_second"] < 600:
-                need_delete_task_key.append(task_key)
-                continue
+            # [逻辑核心]
+            is_long_task = duration > LONG_AUDIO_THRESHOLD
 
-            check_dirty_data(task)
+            if is_long_task:
+                long_batch_buffer.append(task)
+                if len(long_batch_buffer) >= LONG_AUDIO_BATCH_SIZE:
+                    batch_to_send = long_batch_buffer[:LONG_AUDIO_BATCH_SIZE]
+                    long_batch_buffer = long_batch_buffer[LONG_AUDIO_BATCH_SIZE:]
+                    
+                    for t in batch_to_send: tasks["processing"][get_task_key(t)] = t
+                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR)
+                    result_refs.append(ref)
+                    result_ref_map[ref] = batch_to_send
 
-            # handle ray task
-            MAX_NUM_PENDING_TASKS = int(get_ray_total_cpu() / 4)
-            if len(result_refs) < MAX_NUM_PENDING_TASKS:
-                logger.debug(f"append task={task} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
-
-                tasks["processing"][task_key] = task
-                save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
-
-                optimal_task_func = get_optimal_task_function()
-                result_ref = optimal_task_func.remote(task, PODCAST_PATH, OUTPUT_PATH)
-                result_refs.append(result_ref)
-                result_ref_map[result_ref] = task
             else:
-                break
+                short_batch_buffer.append(task)
+                if len(short_batch_buffer) >= BATCH_SIZE:
+                    batch_to_send = short_batch_buffer[:BATCH_SIZE]
+                    short_batch_buffer = short_batch_buffer[BATCH_SIZE:]
+                    
+                    for t in batch_to_send: tasks["processing"][get_task_key(t)] = t
+                    ref = handle_task_ray_gpu.remote(CONFIG_PATH, batch_to_send, PODCAST_PATH, OUTPUT_ROOT_DIR)
+                    result_refs.append(ref)
+                    result_ref_map[ref] = batch_to_send
+            
+            if len(result_refs) >= MAX_POOL_SIZE: break
+        
+        # --- Tail Flushing ---
+        if not task_queue and len(result_refs) < MAX_POOL_SIZE:
+            # 队列彻底为空, 发送残余长音频
+            if long_batch_buffer:
+                for t in long_batch_buffer: tasks["processing"][get_task_key(t)] = t
+                ref = handle_task_ray_gpu.remote(CONFIG_PATH, long_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR)
+                result_refs.append(ref)
+                result_ref_map[ref] = long_batch_buffer
+                long_batch_buffer = []
+            
+            if short_batch_buffer:
+                for t in short_batch_buffer: tasks["processing"][get_task_key(t)] = t
+                ref = handle_task_ray_gpu.remote(CONFIG_PATH, short_batch_buffer, PODCAST_PATH, OUTPUT_ROOT_DIR)
+                result_refs.append(ref)
+                result_ref_map[ref] = short_batch_buffer
+                short_batch_buffer = []
 
-        if len(result_refs) == 0:
-            if tasks['todo']:
-                logger.error(f"no task, but todo not empty")
-            return
+        # --- Retrieval ---
+        if not result_refs and not task_queue and not short_batch_buffer and not long_batch_buffer: break
+        
+        wait_timeout = 5 if len(result_refs) >= MAX_POOL_SIZE else 0.1
+        ready_refs, result_refs = ray.wait(result_refs, num_returns=1, timeout=wait_timeout)
+        
+        if not ready_refs:
+            monitor.report(tasks)
+            continue
 
-        if len(result_refs) > 0:
-            ready_refs, result_refs = ray.wait(result_refs, num_returns=1)
-            logger.debug(f"ray_wait len(ready_refs)={len(ready_refs)} len(result_refs)={len(result_refs)} MAX_NUM_PENDING_TASKS={MAX_NUM_PENDING_TASKS}")
-            if len(ready_refs) > 0:
-                for ready_ref in ready_refs:
-                    ready_task = result_ref_map.get(ready_ref, None)
-                    result_ref_map.pop(ready_ref, None)
-                    if ready_task is None:
-                        ready_task_key = None
-                        logger.error(f"ready_ref can not find task")
-                    else:
-                        ready_task_key = get_task_key(ready_task)
+        for ready_ref in ready_refs:
+            task_batch = result_ref_map.pop(ready_ref, None)
+            try:
+                successful_tasks, failed_tasks = ray.get(ready_ref)
+            except Exception as e:
+                logger.error(f"Ray Crash: {e}")
+                successful_tasks = []
+                failed_tasks = task_batch if task_batch else []
 
-                    try:
-                        task_result_status, ret_task = ray.get(ready_ref)
-                        logger.debug(f"get_ray_task_result status={task_result_status} task={ret_task}")
-                        ret_task_key = get_task_key(ret_task)
-                        need_delete_task_key.append(ret_task_key)
-                        tasks["processing"].pop(ret_task_key, None)
-                        if task_result_status == "SUCCESS":
-                            tasks['complete'].append(ret_task)
-                            tasks['complete_num'] += 1
-                            tasks['complete_total_hour'] += ret_task['audio_duration_second'] / 3600
-                        else:
-                            tasks['failed'].append(ret_task)
-                            tasks['failed_num'] += 1
-                            tasks['failed_total_hour'] += ret_task['audio_duration_second'] / 3600
-                    except Exception as e:
-                        logger.error(f"get ready_ref {ready_task} exception {traceback.format_exc()}")
-                        if ready_task is not None and ready_task_key is not None:
-                            need_delete_task_key.append(ready_task_key)
-                            tasks["processing"].pop(ready_task_key, None)
-                            tasks['failed'].append(ready_task)
-                            tasks['failed_num'] += 1
-                            tasks['failed_total_hour'] += ready_task['audio_duration_second'] / 3600
-                       
-        print_progress(tasks)
+            for task in successful_tasks:
+                task_key = get_task_key(task)
+                tasks["processing"].pop(task_key, None)
+                tasks['complete'].append(task)
+                tasks['complete_num'] += 1
+                tasks['complete_total_hour'] += task['audio_duration_second'] / 3600
 
-        # delete todo task
-        for delete_task_key in need_delete_task_key:
-            i = 0
-            while i < len(tasks['todo']):
-                task = tasks['todo'][i]
-                cur_task_key = get_task_key(task)
-                if cur_task_key == delete_task_key:
-                    logger.debug(f"delete todo task {delete_task_key}")
-                    del tasks['todo'][i]
-                    break
-                else:
-                    i += 1
-        save_tasks(TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE, tasks)
+            for task in failed_tasks:
+                task_key = get_task_key(task)
+                tasks["processing"].pop(task_key, None)
+                tasks['failed'].append(task)
+                tasks['failed_num'] += 1
+                tasks['failed_total_hour'] += task['audio_duration_second'] / 3600
 
-        time.sleep(1)
+        # --- Save ---
+        current_time = time.time()
+        if current_time - last_save_time >= SAVE_INTERVAL_SECONDS:
+            logger.info("Auto-saving...")
+            save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
+            last_save_time = current_time
+            monitor.report(tasks, force_send=True)
+
+    logger.info("Done.")
+    save_tasks(tasks, TASK_RESULT_FILE, TASK_RESULT_BACKUP_FILE)
+    monitor.report(tasks, force_send=True)
 
 def main():
+    ray.init(address="127.0.0.1:6379", ignore_reinit_error=True) 
     try:
         run()
-    except Exception as e:
-        logger.error(f"main exception {traceback.format_exc()}")
+    except Exception:
+        logger.error(f"Main Crashed: {traceback.format_exc()}")
+
+if __name__ == '__main__':
+    main()

@@ -1,12 +1,27 @@
+import json
 import os
 import sys
-import json
-from tqdm import tqdm
+
+from mutagen.aac import AAC
+from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.wave import WAVE
-from mutagen.flac import FLAC
-from mutagen.aac import AAC
+from tqdm import tqdm
+
+
+def get_audio_files(folder_path):
+    """Get all audio files in a folder."""
+    audio_files = []
+    for root, _, files in os.walk(folder_path):
+        if "_processed" in root:
+            continue
+        for file in files:
+            if ".temp" in file:
+                continue
+            if file.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
+                audio_files.append(os.path.join(root, file))
+    return audio_files
 
 def get_audio_duration(file_path):
     try:
@@ -34,52 +49,29 @@ def get_audio_duration(file_path):
             print(f"Error processing {file_path} with pydub: {str(e)}")
             return 3600
 
+
 def analyze_podcasts(base_path):
     podcast_data = []
     podcast_total_seconds = 0
 
-    podcast_names = os.listdir(base_path)
-    for podcast_name in tqdm(podcast_names, desc="Processing Podcasts"):
-        podcast_path = os.path.join(base_path, podcast_name)
-        if not os.path.isdir(podcast_path):
-            continue
+    audio_paths = get_audio_files(base_path)
+    for audio_path in tqdm(audio_paths, desc="Processing Podcasts"):
 
-        episode_data = []
-        episode_total_seconds = 0
-
-        for episode_name in os.listdir(podcast_path):
-            episode_path = os.path.join(podcast_path, episode_name)
-            if not os.path.isfile(episode_path):
-                continue
-
-            if not episode_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
-                continue
-
-            audio_duration = get_audio_duration(episode_path)
-            episode_total_seconds += audio_duration
-
-            episode_data.append({
-                "episode_name": episode_name,
-                "audio_duration_second": audio_duration
-            })
-
-        # Sort episodes by audio duration
-        episode_data.sort(key=lambda x: x["audio_duration_second"], reverse=False)
-
+        relative_path = os.path.relpath(os.path.dirname(audio_path), base_path)
+        audio_duration_second = get_audio_duration(audio_path) 
         podcast_data.append({
-            "podcast_name": podcast_name,
-            "episode_num": len(episode_data),
-            "episode_total_hour": episode_total_seconds / 3600,
-            "episode_data": episode_data
+            "relative_path": relative_path,
+            "audio_path": audio_path,
+            "audio_duration_second": audio_duration_second,
         })
+        podcast_total_seconds += audio_duration_second
 
-        podcast_total_seconds += episode_total_seconds
-
-    # Sort podcasts by total episode hours
-    podcast_data.sort(key=lambda x: x["episode_total_hour"], reverse=False)
+    # Sort podcasts by audio duration
+    podcast_data.sort(key=lambda x: x["audio_duration_second"], reverse=False)
 
     return {
-        "podcast_total_hour": podcast_total_seconds / 3600,
+        "audio_duration_second": podcast_total_seconds,
+        "audio_duration_hour": podcast_total_seconds / 3600,
         "podcast_data": podcast_data
     }
 

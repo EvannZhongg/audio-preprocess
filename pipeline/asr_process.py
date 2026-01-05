@@ -1,6 +1,17 @@
+import re
+
+import jiwer
 import librosa
-from pipeline.global_var import PipelineParam
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
 from utils.logger import time_logger
+
+
+def normalize_text(text):
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s]', '', text)  
+    text = re.sub(r'\s+', ' ', text)     
+    return text
 
 
 @time_logger
@@ -15,14 +26,16 @@ def asr(vad_segments, audio):
     Returns:
         list: A list of ASR results with transcriptions and language details.
     """
+    from pipeline.global_var import PipelineParam
+
     logger = PipelineParam.logger
     cfg = PipelineParam.cfg
     asr_model = PipelineParam.asr_model
     multilingual_flag = PipelineParam.multilingual_flag
     supported_languages = PipelineParam.supported_languages
-    whisper_asr_model = PipelineParam.whisper_asr_model
     batch_size = PipelineParam.batch_size
-    funasr_asr_model = PipelineParam.funasr_asr_model
+    validation_asr_model = PipelineParam.validation_asr_model
+
 
     if len(vad_segments) == 0:
         return []
@@ -46,29 +59,33 @@ def asr(vad_segments, audio):
 
     # --- ASR Cross-Validation Logic ---
     if cfg.get("asr_validation", {}).get("enable", False):
-        logger.info("Running ASR cross-validation with Whisper and FunASR.")
-        whisper_result = whisper_asr_model.transcribe(
-            temp_audio, vad_segments, batch_size=batch_size, print_progress=False
+        logger.info("Running ASR cross-validation.")
+        language=cfg.get("asr_validation", {}).get("language", "zh")
+        asr_result = asr_model.transcribe(
+            temp_audio, vad_segments, batch_size=batch_size, language=language, print_progress=False
         )["segments"]
-        funasr_result = funasr_asr_model.transcribe(
-            temp_audio, vad_segments, print_progress=False
+        validation_result = validation_asr_model.transcribe(
+            temp_audio, vad_segments, batch_size=batch_size, language=language, print_progress=False
         )["segments"]
 
-        if len(whisper_result) != len(funasr_result):
+        if len(asr_result) != len(validation_result):
             logger.warning("ASR models produced different number of segments. Validation failed.")
             return []
 
         validated_segments = []
         wer_threshold = cfg["asr_validation"].get("wer_threshold", 0.15)
 
-        for w_seg, f_seg in zip(whisper_result, funasr_result):
-            error_rate = jiwer.wer(w_seg["text"], f_seg["text"])
-            if error_rate < wer_threshold:
-                # Keep the result from the primary provider
-                primary_seg = w_seg if cfg.get("asr_provider") == "whisper" else f_seg
+        for asr_seg, val_seg, vad_seg in zip(asr_result, validation_result, vad_segments):
+            error_rate = jiwer.cer(normalize_text(asr_seg["text"]),  normalize_text(val_seg["text"]))
+            if error_rate <= wer_threshold:
+                primary_seg = asr_seg
+                primary_seg['val_text'] = val_seg['text']
                 primary_seg["start"] += start_time
                 primary_seg["end"] += start_time
-                primary_seg["language"] = "validated"
+                primary_seg["language"] = language
+                primary_seg["wer"]  = error_rate
+                primary_seg["norm_text"] = rich_transcription_postprocess(asr_seg["text"])
+                primary_seg['min_similarity'] = vad_seg['min_similarity']
                 validated_segments.append(primary_seg)
             else:
                 logger.debug(f"Segment dropped due to high WER: {error_rate:.2f}")
@@ -114,24 +131,16 @@ def asr(vad_segments, audio):
                 print_progress=False,
             )
             result = transcribe_result_temp["segments"]
-            current_vad_segments = [valid_vad_segments[i] for i in same_language_idx]
             
             # restore the segment annotation
             for idx, segment in enumerate(result):
                 result[idx]["start"] += start_time
                 result[idx]["end"] += start_time
                 result[idx]["language"] = transcribe_result_temp["language"]
+                result[idx]["wer"] = 0.
+                result[idx]["norm_text"] = rich_transcription_postprocess(result[idx]["text"])
+                result[idx]['min_similarity'] = vad_segments[idx]['min_similarity']
                 
-                # 使用索引直接匹配传递额外字段（如 min_similarity）
-                if idx < len(current_vad_segments):
-                    for key, value in current_vad_segments[idx].items():
-                        if key not in ["start", "end", "text", "speaker", "index"]:
-                            result[idx][key] = value
-                
-                # 确保有默认值
-                if "min_similarity" not in result[idx]:
-                    result[idx]["min_similarity"] = 0.61
-            
             all_transcribe_result.extend(result)
         # sort by start time
         all_transcribe_result = sorted(all_transcribe_result, key=lambda x: x["start"])
@@ -163,15 +172,8 @@ def asr(vad_segments, audio):
             result[idx]["start"] += start_time
             result[idx]["end"] += start_time
             result[idx]["language"] = transcribe_result["language"]
-            
-            # 使用索引直接匹配传递额外字段（如 min_similarity）
-            if idx < len(vad_segments):
-                for key, value in vad_segments[idx].items():
-                    if key not in ["start", "end", "text", "speaker", "index"]:
-                        result[idx][key] = value
-            
-            # 确保有默认值
-            if "min_similarity" not in result[idx]:
-                result[idx]["min_similarity"] = 0.61
+            result[idx]["wer"] = 0.
+            result[idx]["norm_text"] = rich_transcription_postprocess(result[idx]["text"])
+            result[idx]['min_similarity'] = vad_segments[idx]['min_similarity']
         
         return result

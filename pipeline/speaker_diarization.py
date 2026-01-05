@@ -1,10 +1,7 @@
-import torch
 import pandas as pd
+import torch
 
 from utils.logger import time_logger
-from pipeline.global_var import PipelineParam
-
-logger = PipelineParam.logger
 
 
 # Step 2: Speaker Diarization
@@ -23,6 +20,9 @@ def speaker_diarization(dia_pipeline, audio, provider="pyannote"):
             - pd.DataFrame: A dataframe containing segments with speaker labels.
             - dict: A dictionary mapping speaker labels to their embedding centroids.
     """
+    from pipeline.global_var import PipelineParam
+    logger = PipelineParam.logger
+    
     logger.debug(f"Start speaker diarization with provider: {provider}")
     logger.debug(f"audio waveform shape: {audio['waveform'].shape}")
 

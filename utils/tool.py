@@ -3,12 +3,12 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import hashlib
 import json
 import os
 import re
 import subprocess
 import time
-import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 import librosa
@@ -18,6 +18,7 @@ import soundfile as sf
 import torch
 import tqdm
 from pydub import AudioSegment
+
 from utils.logger import Logger, time_logger
 
 
@@ -347,6 +348,50 @@ def export_to_default(audio, asr_result, folder_path, file_name):
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
 
+@time_logger
+def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
+    """Export segmented audio and metadata to default format (LibriTTS structure with JSON metadata)."""
+    sr = audio["sample_rate"]
+    waveform = audio["waveform"]
+
+    # save_audio
+    wav_path = os.path.join(folder_path, f"{file_name}.wav")
+    write_wav(wav_path, sr, waveform)
+
+    # update json
+    meta_info.clear_sentences()
+    for segment in tqdm.tqdm(asr_result, desc="Exporting to default format"):
+        speaker_id = segment.get("speaker", "UNKNOWN_SPEAKER")
+
+        setence_metadata = {
+            "utt_id": file_name,
+            "speaker_id": speaker_id,
+            "speaker_min_similarity": f'{segment.get("min_similarity", 0.61):.4f}',
+            "language": segment.get('language', 'zh'),
+            "time_range": {
+                "duration": round(segment.get("end", 0.0) - segment.get("start", 0.0), 5),
+                "start": round(segment.get("start", 0.0), 5),
+                "end": round(segment.get("end", 0.0), 5),
+            },
+            "transcription_info": {
+                "text": segment.get("text", ""),
+                "val_text": segment.get("val_text", ""),
+                "norm_text": segment.get("norm_text", ""),
+                "wer": f'{segment.get("wer", 0.):.4f}',
+                "avg_char_duration": f'{segment.get("avg_char_duration", 0.2):.4f}',
+            },
+            "metrics_info":{
+                "dnsmos": f'{segment.get("dnsmos", 0.0):.4f}',
+                "c50": f'{segment.get("c50", 0.0):.4f}',
+                "snr": f'{segment.get("snr", 0.0):.4f}',
+            }
+        }
+        meta_info.add_sentence(setence_metadata)
+
+    save_json_path = os.path.join(folder_path, f"{file_name}.json")
+    meta_info.save_to_file(save_json_path)
+
+
 def get_char_count(text):
     """
     Get the character count of a given text, excluding punctuation and spaces.
@@ -357,25 +402,29 @@ def get_char_count(text):
     return char_count
 
 
-def calculate_audio_stats(
-    data, min_duration=3, max_duration=30, min_dnsmos=3, min_char_count=2
-):
-    """
+def calculate_audio_stats(data, metrics_filter_cfg):
+    """"
     Reading the proviced json, calculate and return the audio ID and their duration that meet the given filtering criteria.
 
     Args:
         data: JSON.
-        min_duration: Minimum duration of the audio in seconds.
-        max_duration: Maximum duration of the audio in seconds.
-        min_dnsmos: Minimum DNSMOS value.
-        min_char_count: Minimum number of characters.
-
+        metrics_filter_cfg: Configuration dictionary containing filtering criteria.
     Returns:
         valid_audio_stats: A list containing tuples of audio ID and their duration.
     """
+
+    min_duration = metrics_filter_cfg.get("min_duration", 3)
+    max_duration = metrics_filter_cfg.get("max_duration", 30)
+    min_char_count = metrics_filter_cfg.get("min_char_count", 2)
+    
+    lower_bound_percent = metrics_filter_cfg.get("lower_bound_percent", 10)
+    upper_bound_percent = metrics_filter_cfg.get("upper_bound_percent", 90)
+
     all_audio_stats = []
     valid_audio_stats = []
     avg_durations = []
+    avg_char_durations = []
+
 
     # iterate over each entry in the JSON to collect the average duration of the phonemes
     for entry in data:
@@ -387,8 +436,8 @@ def calculate_audio_stats(
 
     # calculate the bounds for the average character duration
     if len(avg_durations) > 0:
-        q1 = np.percentile(avg_durations, 25)
-        q3 = np.percentile(avg_durations, 75)
+        q1 = np.percentile(avg_durations, lower_bound_percent)
+        q3 = np.percentile(avg_durations, upper_bound_percent)
         iqr = q3 - q1
         lower_bound = q1 - 1.5 * iqr
         upper_bound = q3 + 1.5 * iqr
@@ -399,7 +448,6 @@ def calculate_audio_stats(
     # iterate over each entry in the JSON to apply all filtering criteria
     for idx, entry in enumerate(data):
         duration = entry["end"] - entry["start"]
-        dnsmos = entry["dnsmos"]
         # remove punctuation and spaces
         char_count = get_char_count(entry["text"])
         if char_count > 0:
@@ -413,15 +461,15 @@ def calculate_audio_stats(
         # apply filtering criteria
         if (
             (min_duration <= duration <= max_duration)  # withing duration range
-            and (dnsmos >= min_dnsmos)
             and (char_count >= min_char_count)
             and (
                 lower_bound <= avg_char_duration <= upper_bound
             )  # average character duration within bounds
         ):
             valid_audio_stats.append((idx, duration))
+            avg_char_durations.append(avg_char_duration)
 
-    return valid_audio_stats, all_audio_stats
+    return valid_audio_stats, all_audio_stats, avg_char_durations
 
 
 def filter_manifest_by_report(manifest_entries, report_path):
@@ -432,7 +480,7 @@ def filter_manifest_by_report(manifest_entries, report_path):
     Args:
         manifest_entries (list): A list of dictionaries, where each dictionary
                                  represents a file to be processed and must
-                                 contain 'PodcastName' and 'EpisodeName'.
+                                 contain 'RelativePath'.
         report_path (str): The path to the processing report CSV file.
 
     Returns:
@@ -454,9 +502,7 @@ def filter_manifest_by_report(manifest_entries, report_path):
 
         report_df = pd.read_csv(report_path)
         # Create a set of tuples for quick lookup
-        processed_set = set(
-            zip(report_df["PodcastName"], report_df["EpisodeName"])
-        )
+        processed_set = set(report_df["RelativePath"])
         logger.info(
             f"Found {len(processed_set)} entries in the processing report."
         )
@@ -472,8 +518,8 @@ def filter_manifest_by_report(manifest_entries, report_path):
             with open(report_path, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if 'PodcastName' in row and 'EpisodeName' in row:
-                        processed_set.add((row['PodcastName'], row['EpisodeName']))
+                    if 'RelativePath' in row:
+                        processed_set.add((row['RelativePath']))
             logger.info(f"Fallback reader found {len(processed_set)} entries.")
         except Exception as csv_e:
             logger.error(f"Fallback CSV reader also failed: {csv_e}. Processing all files.")
@@ -483,7 +529,7 @@ def filter_manifest_by_report(manifest_entries, report_path):
     unprocessed_entries = [
         entry
         for entry in manifest_entries
-        if (entry["PodcastName"], entry["EpisodeName"]) not in processed_set
+        if entry["RelativePath"] not in processed_set
     ]
 
     processed_count = total_count_initial - len(unprocessed_entries)
