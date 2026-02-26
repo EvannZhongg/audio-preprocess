@@ -64,6 +64,94 @@ class ProgressMonitor:
             pass
 
 # ------------------------------------------------------------------
+# --- Daily Summary ---
+# ------------------------------------------------------------------
+
+class DailySummary:
+    def __init__(self, dataset_name, report_hour=10):
+        self.dataset_name = dataset_name
+        self.report_hour = report_hour
+        self.last_report_date = None
+
+    def check_and_report(self, tasks):
+        """检查是否到达每日报告时间，如果是则发送汇总报告"""
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        current_date = now.date()
+        current_hour = now.hour
+
+        # 检查是否已经过了报告时间且今天还没有报告过
+        if current_hour >= self.report_hour and self.last_report_date != current_date:
+            # 计算统计时间范围：昨天10:00到今天10:00
+            today_report_time = datetime.combine(current_date, datetime.min.time()).replace(hour=self.report_hour)
+            yesterday_report_time = today_report_time - timedelta(days=1)
+
+            start_timestamp = yesterday_report_time.timestamp()
+            end_timestamp = today_report_time.timestamp()
+
+            # 统计该时间范围内的数据
+            stats = self._calculate_stats(tasks, start_timestamp, end_timestamp)
+
+            # 发送报告
+            self._send_daily_report(stats, yesterday_report_time, today_report_time)
+
+            # 更新最后报告日期
+            self.last_report_date = current_date
+
+    def _calculate_stats(self, tasks, start_time, end_time):
+        """计算指定时间范围内的统计数据"""
+        success_count = 0
+        success_hours = 0.0
+        failed_count = 0
+        failed_hours = 0.0
+
+        # 统计成功的任务
+        for task in tasks.get('complete', []):
+            completed_at = task.get('completed_at', 0)
+            if start_time <= completed_at <= end_time:
+                success_count += 1
+                success_hours += task.get('audio_duration_second', 0) / 3600
+
+        # 统计失败的任务
+        for task in tasks.get('failed', []):
+            completed_at = task.get('completed_at', 0)
+            if start_time <= completed_at <= end_time:
+                failed_count += 1
+                failed_hours += task.get('audio_duration_second', 0) / 3600
+
+        return {
+            'success_count': success_count,
+            'success_hours': success_hours,
+            'failed_count': failed_count,
+            'failed_hours': failed_hours,
+            'total_count': success_count + failed_count,
+            'total_hours': success_hours + failed_hours
+        }
+
+    def _send_daily_report(self, stats, start_time, end_time):
+        """发送每日汇总报告"""
+        from datetime import datetime
+
+        start_str = start_time.strftime('%Y-%m-%d %H:%M')
+        end_str = end_time.strftime('%Y-%m-%d %H:%M')
+
+        msg = (
+            f"📊 {self.dataset_name} 每日数据处理汇总\n"
+            f"时间范围: {start_str} - {end_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ 成功: {stats['success_count']}个任务, {stats['success_hours']:.2f}小时\n"
+            f"❌ 失败: {stats['failed_count']}个任务, {stats['failed_hours']:.2f}小时\n"
+            f"📈 总计: {stats['total_count']}个任务, {stats['total_hours']:.2f}小时"
+        )
+
+        try:
+            msg_bot.send_msg(msg)
+            logger.info(f"Daily summary sent: {stats['total_hours']:.2f}h processed")
+        except Exception as e:
+            logger.error(f"Failed to send daily summary: {e}")
+
+# ------------------------------------------------------------------
 # --- Utilities ---
 # ------------------------------------------------------------------
 
@@ -139,23 +227,24 @@ def handle_task_ray_gpu(config_path, task_batch, audio_prefix_path, output_path)
 def run():
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     tasks = load_tasks(TASK_RESULT_FILE)
-    
+
     # [排序] 短任务优先。
     if isinstance(tasks['todo'], list):
         tasks['todo'].sort(key=lambda x: x['audio_duration_second'])
-    
+
     task_queue = deque(tasks['todo'])
     tasks['todo'] = task_queue
 
     monitor = ProgressMonitor(DATASET_NAME)
-    
+    daily_summary = DailySummary(DATASET_NAME, report_hour=10)
+
     result_refs = []
     result_ref_map = {}
     last_save_time = time.time()
 
     logger.info(f"🚀 Cluster Job Started. Nodes: Batch Strategy: Mixed.")
 
-    short_batch_buffer = [] 
+    short_batch_buffer = []
     long_batch_buffer = []
 
     while task_queue or result_refs or short_batch_buffer or long_batch_buffer:
@@ -224,6 +313,7 @@ def run():
         
         if not ready_refs:
             monitor.report(tasks)
+            daily_summary.check_and_report(tasks)
             continue
 
         for ready_ref in ready_refs:
@@ -238,6 +328,7 @@ def run():
             for task in successful_tasks:
                 task_key = get_task_key(task)
                 tasks["processing"].pop(task_key, None)
+                task['completed_at'] = time.time()
                 tasks['complete'].append(task)
                 tasks['complete_num'] += 1
                 tasks['complete_total_hour'] += task['audio_duration_second'] / 3600
@@ -245,6 +336,7 @@ def run():
             for task in failed_tasks:
                 task_key = get_task_key(task)
                 tasks["processing"].pop(task_key, None)
+                task['completed_at'] = time.time()
                 tasks['failed'].append(task)
                 tasks['failed_num'] += 1
                 tasks['failed_total_hour'] += task['audio_duration_second'] / 3600
