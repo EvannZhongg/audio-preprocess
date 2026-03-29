@@ -65,9 +65,10 @@ def apply_path_mappings_cached(path_str: str, mappings_tuple):
     return str(path)
 
 
-def get_audio_files(folder_path: str):
+def get_audio_files(folder_path: str, skip_dirs: set = None):
     audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4', '.ogg')
-    skip_dirs = {'_processed', '.temp', 'temp', '.git', '__pycache__'}
+    if skip_dirs is None:
+        skip_dirs = set()
     audio_files = []
 
     for root, dirs, files in os.walk(folder_path, followlinks=False):
@@ -195,12 +196,12 @@ def process_file_optimized(file_path: str):
         "file_size_mb": round(file_size / (1024 * 1024), 2)
     }
 
-def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None):
+def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None, skip_dirs: set = None):
     if max_workers is None:
         max_workers = min(multiprocessing.cpu_count(), 64)
 
     logger.info(f"扫描音频文件（使用 {max_workers} 个进程）...")
-    audio_files = get_audio_files(base_path)
+    audio_files = get_audio_files(base_path, skip_dirs)
 
     if not audio_files:
         return {"error": "未找到音频文件"}
@@ -268,6 +269,8 @@ def main():
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
     parser.add_argument('--path-mapping', type=str, default='/apdcephfs/tts_common/DATA/webdata=/cfs/cfs-czb184s7/DATA/webdata',
                        help='路径映射，如: /old=/new')
+    parser.add_argument('--skip-dirs', type=str, default='',
+                       help='要跳过的目录名，用逗号分隔，如: dir1,dir2,dir3')
 
     args = parser.parse_args()
     logger.setLevel(args.log_level)
@@ -300,8 +303,14 @@ def main():
         logger.error(f"路径映射错误: {e}")
         return
 
+    # 解析要跳过的目录
+    skip_dirs = set()
+    if args.skip_dirs:
+        skip_dirs = {d.strip() for d in args.skip_dirs.split(',') if d.strip()}
+        logger.info(f"跳过的目录: {skip_dirs}")
+
     start_time = time.time()
-    result = analyze_audio_files_parallel(str(base_path), str(base_dir),  args.max_workers, path_mappings)
+    result = analyze_audio_files_parallel(str(base_path), str(base_dir), args.max_workers, path_mappings, skip_dirs)
     end_time = time.time()
     result["processing_time_seconds"] = round(end_time - start_time, 2)
 
