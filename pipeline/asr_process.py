@@ -1,4 +1,5 @@
 import re
+import unicodedata
 
 import jiwer
 import librosa
@@ -7,11 +8,20 @@ from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from utils.logger import time_logger
 
 
-def normalize_text(text):
-    text = text.lower().strip()
-    text = re.sub(r'[^\w\s]', '', text)  
-    text = re.sub(r'\s+', ' ', text)     
-    return text
+def normalize_text_for_wer(text):
+    """Normalize text for WER calculation (English/non-CJK)."""
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    text = unicodedata.normalize('NFKC', text)
+    text = ' '.join(text.split())
+    return text.strip()
+
+
+def normalize_text_for_cer(text):
+    """Normalize text for CER calculation (Chinese/Japanese/Korean)."""
+    text = re.sub(r'[^\w]', '', text)
+    text = unicodedata.normalize('NFKC', text)
+    return text.strip()
 
 
 @time_logger
@@ -76,7 +86,14 @@ def asr(vad_segments, audio):
         wer_threshold = cfg["asr_validation"].get("wer_threshold", 0.15)
 
         for asr_seg, val_seg, vad_seg in zip(asr_result, validation_result, vad_segments):
-            error_rate = jiwer.cer(normalize_text(asr_seg["text"]),  normalize_text(val_seg["text"]))
+            if language in ("zh", "ja", "ko"):
+                ref = normalize_text_for_cer(asr_seg["text"])
+                hyp = normalize_text_for_cer(val_seg["text"])
+                error_rate = jiwer.cer(ref, hyp) if ref and hyp else 1.0
+            else:
+                ref = normalize_text_for_wer(asr_seg["text"])
+                hyp = normalize_text_for_wer(val_seg["text"])
+                error_rate = jiwer.wer(ref, hyp) if ref and hyp else 1.0
             if error_rate <= wer_threshold:
                 primary_seg = asr_seg
                 primary_seg['val_text'] = val_seg['text']
