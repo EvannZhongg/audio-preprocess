@@ -82,7 +82,7 @@
         }
     },
     "strategy_parameters": {
-        "merge_gap": 0.8,
+        "merge_gap": 0.6,
         "min_segment_length": 2.0,
         "max_segment_length": 30.0,
         "strategy": "fixed",
@@ -95,7 +95,7 @@
         "upper_bound_percent": 90,
         "min_char_count": 2.0,
         "inter_similarity_threshold": 0.69,
-        "intra_similarity_threshold": 0.63,
+        "intra_similarity_threshold": 0.64,
         "refinement_batch_size": 256
     },
     "metrics": {
