@@ -1,33 +1,49 @@
-FROM rayproject/ray:2.48.0.2c63f6-py39-cpu
+# Base images 基础镜像
+FROM mirrors.tencent.com/todacc/venus-std-base-cuda12.1:0.2.8
 USER root
 
-RUN apt-get update
-RUN apt-get update && apt-get install -y \
-    vim \
-    net-tools \
-    lrzsz \
-    sox \
-    libsox-dev \
-    build-essential \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+#MAINTAINER 维护者信息
+LABEL MAINTAINER="allenxzhang"
 
-RUN conda create -y -n AudioPipeline python=3.9 && \
-    conda install -n AudioPipeline -y -c conda-forge \
-    ffmpeg \
-    hdbscan
-    
+RUN yum install -y vim net-tools lrzsz sox sox-devel
+
+
+# Install miniforge
+RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /root/miniforge.sh && \
+    /bin/bash /root/miniforge.sh -b -p /opt/conda && \
+    rm /root/miniforge.sh && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo "source /opt/conda/etc/profile.d/conda.sh" >> /root/.bashrc
+
+# 设置conda到PATH环境变量
+ENV PATH="/opt/conda/bin:$PATH"
+
+
+RUN echo "Prepare ENV"
+RUN conda create -y -n AudioPipeline python=3.9
+RUN conda install -n AudioPipeline ffmpeg -y
 RUN conda install -n AudioPipeline pytorch=2.5.0 torchvision=0.20.0 torchaudio=2.5.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
-RUN mkdir -p /home/oicq/audio_preprocess
-RUN pwd
-COPY . /home/oicq/audio_preprocess
-WORKDIR  /home/oicq/audio_preprocess
+
+RUN yum install -y git
+RUN mkdir -p /home/oicq
+WORKDIR /home/oicq
+
+RUN git clone -b allenxzhang https://private:Private_token@git.woa.com/ConversationalAI/audio-preprocess.git
+RUN cp -r /home/oicq/audio-preprocess /home/oicq/audio_preprocess
+WORKDIR /home/oicq/audio_preprocess
 
 RUN echo "source activate AudioPipeline" >> ~/.bashrc
+RUN conda run -n AudioPipeline pip install ray==2.48.0
 RUN conda run -n AudioPipeline pip install -r requirements.txt
 RUN conda run -n AudioPipeline pip install onnxruntime-gpu==1.19.2
 RUN conda run -n AudioPipeline python main.py --prepare_env 1
 
-# ENTRYPOINT ["/bin/bash"]
-ENTRYPOINT ["./scripts/start_ray.sh", "auto"]
+# Set proxy environment variables
+ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
+ENV NO_PROXY=".woa.com,mirrors.cloud.tencent.com,tlinux-mirror.tencent-cloud.com,tlinux-mirrorlist.tencent-cloud.com,localhost,127.0.0.1,mirrors-tlinux.tencentyun.com,.oa.com,.local,.3gqq.com,.7700.org,.ad.com,.ada_sixjoy.com,.addev.com,.app.local,.apps.local,.aurora.com,.autotest123.com,.bocaiwawa.com,.boss.com,.cdc.com,.cdn.com,.cds.com,.cf.com,.cjgc.local,.cm.com,.code.com,.datamine.com,.dvas.com,.dyndns.tv,.ecc.com,.expochart.cn,.expovideo.cn,.fms.com,.great.com,.hadoop.sec,.heme.com,.home.com,.hotbar.com,.ibg.com,.ied.com,.ieg.local,.ierd.com,.imd.com,.imoss.com,.isd.com,.isoso.com,.itil.com,.kao5.com,.kf.com,.kitty.com,.lpptp.com,.m.com,.matrix.cloud,.matrix.net,.mickey.com,.mig.local,.mqq.com,.oiweb.com,.okbuy.isddev.com,.oss.com,.otaworld.com,.paipaioa.com,.qqbrowser.local,.qqinternal.com,.qqwork.com,.rtpre.com,.sc.oa.com,.sec.com,.server.com,.service.com,.sjkxinternal.com,.sllwrnm5.cn,.sng.local,.soc.com,.t.km,.tcna.com,.teg.local,.tencentvoip.com,.tenpayoa.com,.test.air.tenpay.com,.tr.com,.tr_autotest123.com,.vpn.com,.wb.local,.webdev.com,.webdev2.com,.wizard.com,.wqq.com,.wsd.com,.sng.com,.music.lan,.mnet2.com,.tencentb2.com,.tmeoa.com,.pcg.com,www.wip3.adobe.com,www-mm.wip3.adobe.com,mirrors.tencent.com,csighub.tencentyun.com"
+ENV HTTP_PROXY=$ENV_STAR_PROXY
+ENV HTTPS_PROXY=$ENV_STAR_PROXY
+ENV no_proxy=$NO_PROXY
+ENV http_proxy=$ENV_STAR_PROXY
+ENV https_proxy=$ENV_STAR_PROXY
