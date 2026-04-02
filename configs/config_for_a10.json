@@ -10,12 +10,12 @@
             "de"
         ]
     },
-    "asr_provider": "funasr",
-    "validation_asr_provider": "paraformer",
+    "asr_provider": "whisper",
+    "validation_asr_provider": "funasr",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.15,
-        "language": "zh"
+        "language": "en"
     },
     "funasr": {
         "model": "iic/SenseVoiceSmall",
@@ -34,8 +34,8 @@
         "batch_size": 48
     },
     "whisper":{
-        "model": "openai/whisper-large-v3-turbo",
-        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"
+        "model": "Systran/faster-distil-whisper-large-v3",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab"
     },
     "diarization_provider": "pyannote",
     "pyannote": {

@@ -113,8 +113,8 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
     elif asr_provider == "whisper":
         if "whisper" not in cfg:
             raise ValueError("whisper configuration not found in config.json")
-        model_path = cfg["whisper"].get("model", "openai/whisper-large-v3-turbo")
-        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
+        model_path = cfg["whisper"].get("model", "Systran/faster-distil-whisper-large-v3")
+        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab")
         if model_dir_cache and os.path.exists(model_dir_cache):
             model_path = model_dir_cache
         else:
