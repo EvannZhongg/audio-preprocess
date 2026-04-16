@@ -119,8 +119,12 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             model_path = model_dir_cache
         else:
             model_path = model_path
+        whisper_compute_type = cfg["whisper"].get("compute_type", "float16")
+        whisper_batch_size = cfg["whisper"].get("batch_size", 8)
+        PipelineParam.batch_size = whisper_batch_size
         asr_model = whisper_asr.load_asr_model(
-            model_path = model_path,  device=device_name, threads=cli_args.threads, 
+            model_path = model_path,  device=device_name, threads=cli_args.threads,
+            compute_type=whisper_compute_type,
             asr_options={"initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."}
         )
     else:

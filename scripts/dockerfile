@@ -37,7 +37,7 @@ RUN echo "source activate AudioPipeline" >> ~/.bashrc
 RUN conda run -n AudioPipeline pip install ray==2.48.0
 RUN conda run -n AudioPipeline pip install -r requirements.txt
 RUN conda run -n AudioPipeline pip install onnxruntime-gpu==1.19.2
-RUN conda run -n AudioPipeline python main.py --prepare_env 1
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config.json
 
 # Set proxy environment variables
 ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"

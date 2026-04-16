@@ -70,35 +70,27 @@ def get_audio_files(folder_path: str, skip_dirs: set = None):
     if skip_dirs is None:
         skip_dirs = set()
     audio_files = []
+    scanned_dirs = 0
 
     for root, dirs, files in os.walk(folder_path, followlinks=False):
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+        scanned_dirs += 1
+        if scanned_dirs % 100 == 0:
+            logger.info(f"已扫描 {scanned_dirs} 个目录，找到 {len(audio_files)} 个音频文件...")
 
-        try:
-            with os.scandir(root) as it:
-                for entry in it:
-                    if not entry.is_file():
-                        continue
-
-                    name = entry.name
-                    if name.startswith(('.', '~', '._')) or '.temp' in name:
-                        continue
-
-                    if not name.lower().endswith(audio_extensions):
-                        continue
-
-                    try:
-                        size = entry.stat().st_size
-                    except OSError:
-                        # Fallback to general get_file_size_cached
-                        size = get_file_size_cached(entry.path) 
-
-                    if size < 1024:
-                        continue
-
-                    audio_files.append(entry.path)
-        except OSError as e:
-            logger.warning(f"无法扫描目录 {root}: {e}")
+        for name in files:
+            if name.startswith(('.', '~', '._')) or '.temp' in name:
+                continue
+            if not name.lower().endswith(audio_extensions):
+                continue
+            full_path = os.path.join(root, name)
+            try:
+                size = os.stat(full_path).st_size
+            except OSError:
+                continue
+            if size < 1024:
+                continue
+            audio_files.append(full_path)
 
     return audio_files
 
@@ -179,10 +171,7 @@ def process_file_optimized(file_path: str):
     
     new_file_path_str = apply_path_mappings_cached(str(file_path), mappings_tuple)
 
-    file_size = get_file_size_cached(str(file_path))
-    if file_size < 1024:
-        return {"status": "invalid", "path": str(file_path), "reason": "文件过小 (<1KB)"}
-
+    file_size = os.path.getsize(str(file_path))
 
     is_valid, duration_ms, error = validate_audio(str(file_path))
     if not is_valid:
@@ -229,7 +218,8 @@ def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None
             as_completed(futures),
             total=len(futures),
             desc="处理音频文件",
-            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
+            bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+            file=sys.stdout,
         ):
             try:
                 result = future.result()

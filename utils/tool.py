@@ -90,7 +90,7 @@ def get_audio_files(folder_path):
         for file in files:
             if ".temp" in file:
                 continue
-            if file.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
+            if file.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4", ".ogg")):
                 audio_files.append(os.path.join(root, file))
     return audio_files
 

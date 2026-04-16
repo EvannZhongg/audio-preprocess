@@ -90,7 +90,7 @@ def main_process(manifest_entry, output_folder, report_path):
     if file_is_too_large(audio_path, logger):
         return None, []
 
-    if not audio_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
+    if not audio_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4", ".ogg")):
         logger.warning(f"Unsupported file type: {audio_path}")
         return None, []
 
