@@ -232,7 +232,7 @@ def load_asr_model(
     """
 
     if device == 'cpu':
-        assert compute_type == 'float32', 'float16 is not supported on cpu'
+        # assert compute_type == 'float32', 'float16 is not supported on cpu'
         device_name = device
         device_index = 0
     else:
