@@ -120,6 +120,8 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
         else:
             model_path = model_path
         whisper_compute_type = cfg["whisper"].get("compute_type", "float16")
+        if device_name == "cpu" and whisper_compute_type != "float32":
+            whisper_compute_type = "float32"
         whisper_batch_size = cfg["whisper"].get("batch_size", 8)
         PipelineParam.batch_size = whisper_batch_size
         asr_model = whisper_asr.load_asr_model(
