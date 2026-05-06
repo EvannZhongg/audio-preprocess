@@ -48,3 +48,7 @@ filelock
 silero-vad
 mutagen
 ray==2.48.0
+
+# ASR APIs (Qwen3-ASR via Polaris service discovery)
+--index-url https://mirrors.cloud.tencent.com/pypi/simple/
+polaris-cpp-py

@@ -10,12 +10,18 @@
             "de"
         ]
     },
-    "asr_provider": "funasr",
-    "validation_asr_provider": "paraformer",
+    "asr_provider": "qwen3_asr",
+    "validation_asr_provider": "whisper",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.15,
-        "language": "zh"
+        "language": "ja"
+    },
+    "qwen3_asr": {
+        "namespace": "Production",
+        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "model_name": "Qwen/Qwen3-ASR-1.7B",
+        "hot_words": ""
     },
     "funasr": {
         "model": "iic/SenseVoiceSmall",
@@ -31,11 +37,13 @@
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "batch_size": 32
+        "batch_size": 48
     },
-    "whisper":{
-        "model": "openai/whisper-large-v3-turbo",
-        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"
+    "whisper": {
+        "model": "Systran/faster-distil-whisper-large-v3",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-large-v3/snapshots/edaa852ec7e145841d8ffdb056a99866b5f0a478",
+        "compute_type": "int8_float16",
+        "batch_size": 4
     },
     "diarization_provider": "pyannote",
     "pyannote": {
@@ -45,12 +53,6 @@
     "gemini": {
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
         "model": "gemini-2.5-flash"
-    },
-    "qwen3_asr": {
-        "namespace": "Production",
-        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
-        "model_name": "Qwen/Qwen3-ASR-1.7B",
-        "hot_words": ""
     },
     "embedding_refinement": {
         "enable": true,
@@ -81,32 +83,35 @@
         },
         "smru": {
             "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
-            "chunk_size": 12,
+            "chunk_size": 10,
             "valid_size": 8,
-            "overlap": 1,
-            "batch_size": 4
+            "overlap": 2,
+            "batch_size": 6
         }
     },
     "strategy_parameters": {
-        "merge_gap": 0.8,
+        "merge_gap": 0.6,
         "min_segment_length": 2.0,
         "max_segment_length": 30.0,
         "strategy": "fixed",
-        "fixed_dnsmos_threshold": 3.0,
+        "fixed_dnsmos_threshold": 2.8,
         "fixed_c50_threshold": 40.0,
         "fixed_snr_threshold": 30.0,
-        "min_duration":2.0,
-        "max_duration":30.0,
+        "min_duration": 2.0,
+        "max_duration": 30.0,
+        "lower_bound_percent": 10,
+        "upper_bound_percent": 90,
         "min_char_count": 2.0,
-        "inter_similarity_threshold": 0.7,
-        "intra_similarity_threshold": 0.62
+        "inter_similarity_threshold": 0.6,
+        "intra_similarity_threshold": 0.6,
+        "refinement_batch_size": 64
     },
     "metrics": {
-        "dnsmos":{
+        "dnsmos": {
             "mos_model_path": "ckpts/sig_bak_ovr.onnx"
         },
         "use_brouhaha": true,
-        "brouhaha":{
+        "brouhaha": {
             "model": "pyannote/brouhaha",
             "model_dir_cache": "/root/.cache/torch/pyannote/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin"
         }

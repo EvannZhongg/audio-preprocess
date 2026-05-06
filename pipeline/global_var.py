@@ -18,6 +18,11 @@ try:
 except ImportError:
     pass
 
+try:
+    import models.qwen3_asr as qwen3_asr
+except ImportError:
+    pass
+
 
 class PipelineParam:
     g_args = None
@@ -129,6 +134,19 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             compute_type=whisper_compute_type,
             asr_options={"initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."}
         )
+
+    elif asr_provider == "qwen3_asr":
+        if "qwen3_asr" not in cfg:
+            raise ValueError("qwen3_asr configuration not found in config.json")
+        qwen3_cfg = cfg["qwen3_asr"]
+        asr_model = qwen3_asr.load_asr_model(
+            namespace=qwen3_cfg.get("namespace", "Production"),
+            service=qwen3_cfg.get("service", "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService"),
+            model_name=qwen3_cfg.get("model_name", "Qwen/Qwen3-ASR-1.7B"),
+            device=device_name,
+            hot_words=qwen3_cfg.get("hot_words", ""),
+        )
+
     else:
         raise ValueError(f"Unknown ASR provider: {asr_provider}")
     return asr_model
