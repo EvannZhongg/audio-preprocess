@@ -1,7 +1,9 @@
 # Core AI/ML Framework
-torch==2.5.0
-torchaudio==2.5.0
-torchvision==0.20.0
+# NOTE: torch/torchaudio/torchvision are installed via conda in Dockerfile,
+# do not install them again via pip to avoid version conflicts.
+# torch==2.5.0
+# torchaudio==2.5.0
+# torchvision==0.20.0
 
 
 # Diarization & Speaker Verification
