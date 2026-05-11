@@ -1,3 +1,5 @@
+/* eslint-disable padded-blocks, camelcase */
+/* CodeCC告警-代码规范ignore: 接口字段命名沿用后端 snake_case；空行风格保留以提升可读性 */
 document.addEventListener('DOMContentLoaded', () => {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
