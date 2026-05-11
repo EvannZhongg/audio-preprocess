@@ -1,3 +1,4 @@
+# NOCA:horus-dependency-security(ray/aiohttp/torch 依赖版本与训练/推理工具链兼容性强绑定,升级需评估,暂忽略安全告警)
 # Core AI/ML Framework
 torch==2.5.0
 torchaudio==2.5.0
