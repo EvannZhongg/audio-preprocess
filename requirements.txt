@@ -26,7 +26,7 @@ scikit-learn
 funasr==1.2.4
 aiohttp==3.9.2
 faster-whisper==1.1.0
-whisperx==3.3.0
+whisperx>=3.3.0
 jiwer==4.0.0
 # Audio-quality metrics
 ./third_party/brouhaha-vad-main.zip
