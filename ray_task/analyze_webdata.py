@@ -4,7 +4,6 @@ import logging
 import multiprocessing
 import os
 import sys
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
 import time
@@ -66,7 +65,7 @@ def apply_path_mappings_cached(path_str: str, mappings_tuple):
 
 
 def get_audio_files(folder_path: str, skip_dirs: set = None):
-    audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4', '.ogg')
+    audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4', '.ogg', '.webm')
     if skip_dirs is None:
         skip_dirs = set()
     audio_files = []
@@ -97,6 +96,7 @@ def get_audio_files(folder_path: str, skip_dirs: set = None):
 # --- 性能关键点：音频验证函数 (使用 ffprobe 加速) ---
 
 def validate_audio_pydub_fallback(file_path: str):
+    """最后兜底：pydub（全量解码，最慢但兼容性最好）"""
     try:
         from pydub import AudioSegment
         audio = AudioSegment.from_file(file_path)
@@ -108,41 +108,57 @@ def validate_audio_pydub_fallback(file_path: str):
         return False, None, f"解码失败 (pydub): {str(e)}"
 
 
-def validate_audio(file_path: str):
+def validate_audio_ffprobe(file_path: str):
+    """第二级 fallback：ffprobe（可靠但慢）"""
     ffprobe_cmd = [
-        'ffprobe',
-        '-v', 'error',
+        'ffprobe', '-v', 'error',
         '-show_entries', 'format=duration',
-        '-of', 'json',
-        file_path
+        '-of', 'json', file_path
     ]
-    
     try:
         result = subprocess.run(
             ffprobe_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-            timeout=10 # 设置超时，防止文件损坏导致卡死
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True, timeout=10
         )
-        
         data = standard_json.loads(result.stdout)
-        
         if 'format' not in data or 'duration' not in data['format']:
             return validate_audio_pydub_fallback(file_path)
-
         duration_s = float(data['format']['duration'])
         duration_ms = int(duration_s * 1000)
-
         if duration_ms <= 0 or duration_ms > 86400000:
             return False, None, "时长异常 (ffprobe)"
-            
         return True, duration_ms, None
-        
     except (subprocess.CalledProcessError, FileNotFoundError, standard_json.JSONDecodeError):
         return validate_audio_pydub_fallback(file_path)
+    except subprocess.TimeoutExpired:
+        return False, None, "ffprobe 超时"
     except Exception as e:
         return False, None, f"ffprobe 失败: {str(e)}"
+
+
+def validate_audio(file_path: str):
+    """
+    混合策略：mutagen 优先 + ffprobe fallback + pydub 最终兜底。
+    OGG/FLAC/MP4/WAV 等规范容器，mutagen 只读 header 的几 KB，
+    耗时约 0.5-2ms，比 ffprobe 快 30-100 倍。
+    """
+    # 第一级：mutagen
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(file_path)
+        if audio is not None and audio.info is not None:
+            length = getattr(audio.info, 'length', None)
+            if length is not None and length > 0:
+                duration_ms = int(length * 1000)
+                if duration_ms > 86400000:
+                    return False, None, "时长异常 (mutagen)"
+                return True, duration_ms, None
+    except Exception:
+        pass
+
+    # 第二级：ffprobe
+    return validate_audio_ffprobe(file_path)
 
 
 def process_file_optimized(file_path: str):
@@ -190,50 +206,61 @@ def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None
         max_workers = min(multiprocessing.cpu_count(), 64)
 
     logger.info(f"扫描音频文件（使用 {max_workers} 个进程）...")
+    scan_start = time.time()
     audio_files = get_audio_files(base_path, skip_dirs)
+    logger.info(f"扫描耗时 {time.time() - scan_start:.1f}s")
 
     if not audio_files:
         return {"error": "未找到音频文件"}
 
-    logger.info(f"找到 {len(audio_files)} 个候选文件")
-    logger.info(f"开始并行处理（{max_workers} 进程...")
+    total = len(audio_files)
+    logger.info(f"找到 {total} 个候选文件")
+    logger.info(f"开始并行处理（{max_workers} 进程，imap_unordered chunksize=500）...")
 
     path_mappings_serialized = [(str(old), str(new)) for old, new in path_mappings] if path_mappings else []
 
     valid_files = []
     invalid_files = []
     total_duration = 0
+    process_start = time.time()
 
-    with ProcessPoolExecutor(
-        max_workers=max_workers,
-        initializer=init_worker, 
+    with multiprocessing.Pool(
+        processes=max_workers,
+        initializer=init_worker,
         initargs=(base_dir, path_mappings_serialized,)
-    ) as executor:
-        futures = {
-            executor.submit(process_file_optimized, fp): fp
-            for fp in audio_files
-        }
+    ) as pool:
+        results_iter = pool.imap_unordered(
+            process_file_optimized,
+            audio_files,
+            chunksize=500
+        )
 
-        for future in tqdm(
-            as_completed(futures),
-            total=len(futures),
+        pbar = tqdm(
+            results_iter,
+            total=total,
             desc="处理音频文件",
             bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
             file=sys.stdout,
-        ):
-            try:
-                result = future.result()
-            except Exception as e:
-                fp = futures[future]
-                result = {"status": "invalid", "path": fp, "reason": f"进程崩溃: {e}"}
+        )
 
+        for i, result in enumerate(pbar, 1):
             if result["status"] == "valid":
                 valid_files.append(result)
                 total_duration += result["audio_duration_second"]
             else:
                 invalid_files.append(result)
 
-    # valid_files.sort(key=lambda x: x["audio_duration_second"])
+            if i % 10000 == 0:
+                elapsed = time.time() - process_start
+                rate = i / elapsed if elapsed > 0 else 0
+                eta = (total - i) / rate if rate > 0 else 0
+                logger.info(
+                    f"进度 {i}/{total} ({100*i/total:.1f}%), "
+                    f"valid={len(valid_files)}, invalid={len(invalid_files)}, "
+                    f"速率={rate:.0f} files/s, 已耗时={elapsed:.0f}s, 预计剩余={eta:.0f}s"
+                )
+
+    logger.info(f"处理总耗时 {time.time() - process_start:.1f}s")
 
     return {
         "audio_duration_second": int(total_duration),
@@ -264,6 +291,18 @@ def main():
 
     args = parser.parse_args()
     logger.setLevel(args.log_level)
+
+    # 预检输出路径可写
+    output_path = Path(args.output)
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        test_file = output_path.parent / '.write_test'
+        test_file.touch()
+        test_file.unlink()
+        logger.info(f"✅ 输出路径可写: {output_path.parent}")
+    except Exception as e:
+        logger.error(f"❌ 输出路径不可写: {output_path.parent}, 错误: {e}")
+        return
 
     base_path = Path(args.path).resolve()
     if not base_path.exists():
