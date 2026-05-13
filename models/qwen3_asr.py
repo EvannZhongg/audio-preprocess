@@ -101,7 +101,11 @@ class Qwen3ASR:
 
         request = GetInstancesRequest(namespace=self.namespace, service=self.service)
         try:
-            response = self.consumer_api.get_instances(request)
+            # prefer get_all_instances (new API), fallback to get_instances (deprecated)
+            if hasattr(self.consumer_api, 'get_all_instances'):
+                response = self.consumer_api.get_all_instances(request)
+            else:
+                response = self.consumer_api.get_instances(request)
             self.instances = []
             for inst in response:
                 host = inst.get_host()
@@ -325,6 +329,7 @@ class Qwen3ASR:
                 "start": round(segment_info["start"], 3),
                 "end": round(segment_info["end"], 3),
                 "speaker": segment_info.get("speaker", None),
+                "detected_language": seg_language,
             })
 
         logger.info(

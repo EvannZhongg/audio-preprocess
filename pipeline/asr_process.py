@@ -86,6 +86,15 @@ def asr(vad_segments, audio):
         wer_threshold = cfg["asr_validation"].get("wer_threshold", 0.15)
 
         for asr_seg, val_seg, vad_seg in zip(asr_result, validation_result, vad_segments):
+            # 语种过滤：如果 qwen3_asr 检测到的语种不匹配目标语种，跳过该段
+            seg_detected_lang = asr_seg.get("detected_language")
+            if seg_detected_lang and seg_detected_lang != "unknown" and seg_detected_lang != language:
+                logger.debug(
+                    f"Segment skipped due to language mismatch: "
+                    f"detected '{seg_detected_lang}', expected '{language}'"
+                )
+                continue
+
             if language in ("zh", "ja", "ko"):
                 ref = normalize_text_for_cer(asr_seg["text"])
                 hyp = normalize_text_for_cer(val_seg["text"])
