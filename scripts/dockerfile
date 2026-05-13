@@ -20,7 +20,7 @@ ENV PATH="/opt/conda/bin:$PATH"
 
 
 RUN echo "Prepare ENV"
-RUN conda create -y -n AudioPipeline python=3.9.21
+RUN conda create -y -n AudioPipeline python=3.9.21 pip
 RUN conda install -n AudioPipeline ffmpeg -y
 RUN conda install -n AudioPipeline pytorch=2.5.0 torchvision=0.20.0 torchaudio=2.5.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
@@ -29,15 +29,16 @@ RUN yum install -y git
 RUN mkdir -p /home/oicq
 WORKDIR /home/oicq
 
-RUN git clone -b allenxzhang https://private:Private_token@git.woa.com/ConversationalAI/audio-preprocess.git
+RUN git clone -b allenxzhang https://private:_QE-P04-_yUclgfW_WKG@git.woa.com/ConversationalAI/audio-preprocess.git
 RUN cp -r /home/oicq/audio-preprocess /home/oicq/audio_preprocess
+# COPY . /home/oicq/audio_preprocess
 WORKDIR /home/oicq/audio_preprocess
 
 RUN echo "source activate AudioPipeline" >> ~/.bashrc
-RUN /opt/conda/envs/AudioPipeline/bin/pip install ray==2.48.0
-RUN /opt/conda/envs/AudioPipeline/bin/pip install -r requirements.txt
-RUN /opt/conda/envs/AudioPipeline/bin/pip install onnxruntime-gpu==1.19.2
-RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/./configs/config_for_a10_for_en.json
+RUN conda run -n AudioPipeline python -m pip install ray==2.48.0
+RUN conda run -n AudioPipeline python -m pip install -r requirements.txt
+RUN conda run -n AudioPipeline python -m pip install onnxruntime-gpu==1.19.2
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_ko.json
 
 # Set proxy environment variables
 ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
@@ -47,3 +48,6 @@ ENV HTTPS_PROXY=$ENV_STAR_PROXY
 ENV no_proxy=$NO_PROXY
 ENV http_proxy=$ENV_STAR_PROXY
 ENV https_proxy=$ENV_STAR_PROXY
+
+# 新增这行 CMD 命令，确保容器常驻不退出
+# CMD ["tail", "-f", "/dev/null"]
