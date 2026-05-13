@@ -216,6 +216,12 @@ class Qwen3ASR:
             # Map language name to ISO code
             lang_code = self.LANGUAGE_MAPPING.get(detected_language, 'unknown')
 
+            if not text:
+                logger.warning(f"Qwen3-ASR returned empty text. Raw response: {content_text[:200]}")
+
+            if lang_code == 'unknown' and detected_language != 'unknown':
+                logger.warning(f"Qwen3-ASR detected unknown language mapping: '{detected_language}'")
+
             return {
                 'text': text,
                 'language': lang_code,
@@ -280,6 +286,7 @@ class Qwen3ASR:
         segments = []
         detected_language = "unknown"
         sample_rate = 16000  # Audio should already be resampled to 16kHz
+        empty_count = 0
 
         for idx, segment_info in enumerate(vad_segments):
             start_frame = int(segment_info["start"] * sample_rate)
@@ -293,6 +300,7 @@ class Qwen3ASR:
                     "end": round(segment_info["end"], 3),
                     "speaker": segment_info.get("speaker", None),
                 })
+                empty_count += 1
                 continue
 
             result = self._transcribe_single(
@@ -305,6 +313,9 @@ class Qwen3ASR:
             text = result.get('text', '').strip()
             seg_language = result.get('language', 'unknown')
 
+            if not text:
+                empty_count += 1
+
             # Use the first successfully detected language as the overall language
             if detected_language == "unknown" and seg_language != "unknown":
                 detected_language = seg_language
@@ -315,6 +326,11 @@ class Qwen3ASR:
                 "end": round(segment_info["end"], 3),
                 "speaker": segment_info.get("speaker", None),
             })
+
+        logger.info(
+            f"Qwen3-ASR transcribe done: {len(segments)} segments, "
+            f"{empty_count} empty, language={detected_language}"
+        )
 
         # Clear memory
         if torch.cuda.is_available():
