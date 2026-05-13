@@ -40,10 +40,10 @@
         "batch_size": 256
     },
     "whisper":{
-        "model": "openai/whisper-large-v3-turbo",
+        "model": "Systran/faster-distil-whisper-large-v3",
         "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
-        "compute_type": "int8_float16",
-        "batch_size": 8
+        "compute_type": "float16",
+        "batch_size": 12
     },
     "diarization_provider": "pyannote",
     "pyannote": {
