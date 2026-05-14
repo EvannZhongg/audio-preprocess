@@ -48,7 +48,7 @@
     "diarization_provider": "pyannote",
     "pyannote": {
         "model": "pyannote/speaker-diarization-3.1",
-        "model_dir_cache": "ckpts/pyannote_config.yaml"
+        "model_dir_cache": "ckpts/pyannote_config_v2.yaml"
     },
     "gemini": {
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
@@ -86,7 +86,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 9
+            "batch_size": 10
         }
     },
     "strategy_parameters": {
