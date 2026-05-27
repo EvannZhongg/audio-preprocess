@@ -87,6 +87,34 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
 
         asr_model = funasr_asr.load_asr_model(asr_model="SenseVoice", model_dir=funasr_model_dir, vad_model_dir=funasr_vad_model_dir, device=device_name)
 
+    elif asr_provider == "funasr_nano":
+        if "funasr_nano" not in cfg:
+            raise ValueError("FunASR Nano configuration not found in config.json")
+
+        nano_model = cfg["funasr_nano"].get("model", "FunAudioLLM/Fun-ASR-MLT-Nano-2512")
+        nano_vad_model = cfg["funasr_nano"].get("vad_model", "fsmn-vad")
+        nano_model_dir_cache = cfg["funasr_nano"].get("model_dir_cache", "")
+        nano_vad_model_dir_cache = cfg["funasr_nano"].get("vad_model_dir_cache", "")
+        nano_batch_size = cfg["funasr_nano"].get("batch_size", 16)
+
+        if nano_model_dir_cache and os.path.exists(nano_model_dir_cache):
+            nano_model_dir = nano_model_dir_cache
+        else:
+            nano_model_dir = nano_model
+
+        if nano_vad_model_dir_cache and os.path.exists(nano_vad_model_dir_cache):
+            nano_vad_model_dir = nano_vad_model_dir_cache
+        else:
+            nano_vad_model_dir = nano_vad_model
+
+        asr_model = funasr_asr.load_asr_model(
+            asr_model="FunASRNano",
+            model_dir=nano_model_dir,
+            vad_model_dir=nano_vad_model_dir,
+            device=device_name,
+            batch_size=nano_batch_size
+        )
+
     elif asr_provider == "paraformer":
         if "paraformer" not in cfg:
             raise ValueError("Paraformer configuration not found in config.json")
