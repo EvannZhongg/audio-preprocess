@@ -18,6 +18,12 @@
         "wer_threshold": 0.6,
         "language": "ru"
     },
+    "qwen3_asr": {
+        "namespace": "Production",
+        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "model_name": "Qwen/Qwen3-ASR-1.7B",
+        "hot_words": ""
+    },
     "funasr_nano": {
         "model": "FunAudioLLM/Fun-ASR-MLT-Nano-2512",
         "model_dir_cache": "/root/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-MLT-Nano-2512",
