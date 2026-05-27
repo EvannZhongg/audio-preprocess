@@ -68,13 +68,61 @@ def get_audio_files(folder_path: str, skip_dirs: set = None):
     audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4', '.ogg', '.webm')
     if skip_dirs is None:
         skip_dirs = set()
+
+    # 使用 find 命令加速扫描，在网络文件系统上比 os.walk 快很多
+    try:
+        # 构建扩展名匹配参数
+        ext_args = []
+        for i, ext in enumerate(audio_extensions):
+            if i > 0:
+                ext_args.append('-o')
+            ext_args.extend(['-iname', f'*{ext}'])
+
+        # 添加排除目录
+        if skip_dirs:
+            prune_parts = []
+            for d in skip_dirs:
+                if prune_parts:
+                    prune_parts.append('-o')
+                prune_parts.extend(['-name', d])
+            cmd = ['find', folder_path, '('] + prune_parts + [')', '-prune', '-o', '-type', 'f', '('] + ext_args + [')', '-print']
+        else:
+            cmd = ['find', folder_path, '-type', 'f', '('] + ext_args + [')']
+
+        logger.info(f"使用 find 命令扫描: {folder_path}")
+
+        # 流式读取 find 输出，实时打印进度
+        audio_files = []
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            name = os.path.basename(line)
+            if name.startswith(('.', '~', '._')) or '.temp' in name:
+                continue
+            audio_files.append(line)
+
+            count = len(audio_files)
+            if count % 10000 == 0:
+                logger.info(f"find 扫描中... 已找到 {count} 个音频文件")
+
+        proc.wait()
+        logger.info(f"find 命令扫描完成，共找到 {len(audio_files)} 个音频文件")
+        return audio_files
+
+    except Exception as e:
+        logger.warning(f"find 命令失败 ({e})，回退到 os.walk 扫描")
+
+    # fallback: os.walk
     audio_files = []
     scanned_dirs = 0
 
     for root, dirs, files in os.walk(folder_path, followlinks=False):
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
         scanned_dirs += 1
-        if scanned_dirs % 100 == 0:
+        if scanned_dirs % 10 == 0:
             logger.info(f"已扫描 {scanned_dirs} 个目录，找到 {len(audio_files)} 个音频文件...")
 
         for name in files:
@@ -83,12 +131,6 @@ def get_audio_files(folder_path: str, skip_dirs: set = None):
             if not name.lower().endswith(audio_extensions):
                 continue
             full_path = os.path.join(root, name)
-            try:
-                size = os.stat(full_path).st_size
-            except OSError:
-                continue
-            if size < 1024:
-                continue
             audio_files.append(full_path)
 
     return audio_files
@@ -142,7 +184,15 @@ def validate_audio(file_path: str):
     混合策略：mutagen 优先 + ffprobe fallback + pydub 最终兜底。
     OGG/FLAC/MP4/WAV 等规范容器，mutagen 只读 header 的几 KB，
     耗时约 0.5-2ms，比 ffprobe 快 30-100 倍。
+    返回: (is_valid, duration_ms, file_size, error)
     """
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size < 1024:
+            return False, None, 0, "文件过小 (<1KB)"
+    except OSError:
+        return False, None, 0, "无法获取文件大小"
+
     # 第一级：mutagen
     try:
         from mutagen import File as MutagenFile
@@ -152,31 +202,32 @@ def validate_audio(file_path: str):
             if length is not None and length > 0:
                 duration_ms = int(length * 1000)
                 if duration_ms > 86400000:
-                    return False, None, "时长异常 (mutagen)"
-                return True, duration_ms, None
+                    return False, None, file_size, "时长异常 (mutagen)"
+                return True, duration_ms, file_size, None
     except Exception:
         pass
 
     # 第二级：ffprobe
-    return validate_audio_ffprobe(file_path)
+    is_valid, duration_ms, error = validate_audio_ffprobe(file_path)
+    return is_valid, duration_ms, file_size, error
 
 
 def process_file_optimized(file_path: str):
     file_path = Path(file_path)
-    
+
     base_dir = _GLOBAL_CONFIGS.get('base_dir')
     mappings = _GLOBAL_MAPPINGS
-    mappings_tuple = tuple(tuple(str(p) for p in m) for m in mappings) 
+    mappings_tuple = tuple(tuple(str(p) for p in m) for m in mappings)
 
     if not base_dir:
         return {"status": "invalid", "path": str(file_path), "reason": "进程未正确初始化 (BaseDir缺失)"}
 
     try:
         relative_dir = file_path.parent.relative_to(base_dir)
-        
+
         mapped_relative_path_str = apply_path_mappings_cached(str(base_dir / relative_dir), mappings_tuple)
         mapped_relative_path = Path(mapped_relative_path_str)
-        
+
         if mappings:
             new_base = mappings[0][1]
             final_relative = mapped_relative_path.relative_to(new_base)
@@ -184,12 +235,10 @@ def process_file_optimized(file_path: str):
             final_relative = relative_dir
     except Exception as e:
         return {"status": "invalid", "path": str(file_path), "reason": f"路径计算失败: {e}"}
-    
+
     new_file_path_str = apply_path_mappings_cached(str(file_path), mappings_tuple)
 
-    file_size = os.path.getsize(str(file_path))
-
-    is_valid, duration_ms, error = validate_audio(str(file_path))
+    is_valid, duration_ms, file_size, error = validate_audio(str(file_path))
     if not is_valid:
         return {"status": "invalid", "path": str(file_path), "reason": error}
 
@@ -201,14 +250,50 @@ def process_file_optimized(file_path: str):
         "file_size_mb": round(file_size / (1024 * 1024), 2)
     }
 
-def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None, skip_dirs: set = None):
+def load_filelist(filelist_path: str):
+    """从预先生成的文件列表中加载音频路径"""
+    audio_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.aac', '.mp4', '.ogg', '.webm')
+    audio_files = []
+    skipped = 0
+
+    logger.info(f"从文件列表加载: {filelist_path}")
+    with open(filelist_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            # 检查扩展名
+            if not line.lower().endswith(audio_extensions):
+                skipped += 1
+                continue
+            name = os.path.basename(line)
+            if name.startswith(('.', '~', '._')) or '.temp' in name:
+                skipped += 1
+                continue
+            audio_files.append(line)
+
+            count = len(audio_files)
+            if count % 100000 == 0:
+                logger.info(f"已加载 {count} 个音频路径...")
+
+    logger.info(f"文件列表加载完成: {len(audio_files)} 个音频, 跳过 {skipped} 个")
+    return audio_files
+
+
+def analyze_audio_files_parallel(base_path: str, base_dir: str, max_workers=None, path_mappings=None, skip_dirs: set = None, filelist: str = None):
     if max_workers is None:
         max_workers = min(multiprocessing.cpu_count(), 64)
 
-    logger.info(f"扫描音频文件（使用 {max_workers} 个进程）...")
-    scan_start = time.time()
-    audio_files = get_audio_files(base_path, skip_dirs)
-    logger.info(f"扫描耗时 {time.time() - scan_start:.1f}s")
+    # 从文件列表加载 或 扫描目录
+    if filelist and os.path.exists(filelist):
+        scan_start = time.time()
+        audio_files = load_filelist(filelist)
+        logger.info(f"文件列表加载耗时 {time.time() - scan_start:.1f}s")
+    else:
+        logger.info(f"扫描音频文件（使用 {max_workers} 个进程）...")
+        scan_start = time.time()
+        audio_files = get_audio_files(base_path, skip_dirs)
+        logger.info(f"扫描耗时 {time.time() - scan_start:.1f}s")
 
     if not audio_files:
         return {"error": "未找到音频文件"}
@@ -288,6 +373,8 @@ def main():
                        help='路径映射，如: /old=/new')
     parser.add_argument('--skip-dirs', type=str, default='',
                        help='要跳过的目录名，用逗号分隔，如: dir1,dir2,dir3')
+    parser.add_argument('--filelist', type=str, default=None,
+                       help='预生成的文件列表路径（跳过扫描阶段），用 find 命令生成')
 
     args = parser.parse_args()
     logger.setLevel(args.log_level)
@@ -339,7 +426,7 @@ def main():
         logger.info(f"跳过的目录: {skip_dirs}")
 
     start_time = time.time()
-    result = analyze_audio_files_parallel(str(base_path), str(base_dir), args.max_workers, path_mappings, skip_dirs)
+    result = analyze_audio_files_parallel(str(base_path), str(base_dir), args.max_workers, path_mappings, skip_dirs, filelist=args.filelist)
     end_time = time.time()
     result["processing_time_seconds"] = round(end_time - start_time, 2)
 
