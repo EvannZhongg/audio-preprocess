@@ -12,11 +12,11 @@
         ]
     },
     "asr_provider": "qwen3_asr",
-    "validation_asr_provider": "funasr",
+    "validation_asr_provider": "funasr_nano",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.6,
-        "language": "ko"
+        "language": "fr"
     },
     "qwen3_asr": {
         "namespace": "Production",
@@ -155,7 +155,7 @@
         "thresholds": {
             "ppl_max": 300,
             "semantic_min": 0.5,
-            "spell_min": 0.3,
+            "spell_min": 0.55,
             "llm_quality_min": 5.0,
             "tts_min": 4.0
         }

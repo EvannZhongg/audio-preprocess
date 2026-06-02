@@ -33,6 +33,13 @@ META_INFO_TEMPLATE = {
                 "c50": 40,
                 "dnsmos": 3
             },
+            "text_quality_info": {
+                "ppl": -1.0,
+                "semantic_score": -1.0,
+                "spell_score": -1.0,
+                "llm_quality": -1.0,
+                "tts_suitability": -1.0
+            },
             "speaker_info": {},
             "paralinguistics_info": {}
         }

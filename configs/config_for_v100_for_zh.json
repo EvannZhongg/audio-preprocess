@@ -16,7 +16,7 @@
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.6,
-        "language": "ko"
+        "language": "zh"
     },
     "qwen3_asr": {
         "namespace": "Production",
@@ -153,7 +153,7 @@
             "max_retries": 2
         },
         "thresholds": {
-            "ppl_max": 300,
+            "ppl_max": 150,
             "semantic_min": 0.5,
             "spell_min": 0.3,
             "llm_quality_min": 5.0,

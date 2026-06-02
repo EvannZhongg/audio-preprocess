@@ -51,6 +51,9 @@ silero-vad
 mutagen
 ray==2.48.0
 
+# Text quality scoring
+language-tool-python>=2.7
+
 # ASR APIs (Qwen3-ASR via Polaris service discovery)
 --extra-index-url https://mirrors.cloud.tencent.com/pypi/simple/
 polaris-cpp-py

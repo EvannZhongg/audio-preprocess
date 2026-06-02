@@ -14,6 +14,8 @@ from pipeline.pipeline_report import (append_to_report,
 from pipeline.source_separation import source_separation
 from pipeline.speaker_diarization import speaker_diarization
 from pipeline.standardization import standardization
+from pipeline.text_quality_filtering import (filter_by_text_quality,
+                                             text_quality_prediction)
 from pipeline.vad_process import (cut_by_speaker_label,
                                   refine_vad_list_by_embedding)
 from utils.meta_info_config import MetaConfig
@@ -77,6 +79,7 @@ def main_process(manifest_entry, output_folder, report_path):
             'post_process_vad': {'discarded_count': 0, 'discarded_duration': 0.0},
             'asr': {'discarded_count': 0, 'discarded_duration': 0.0},
             'metrics_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'text_quality_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
         },
         'final': {'count': 0, 'duration': 0.0}
     }
@@ -198,6 +201,23 @@ def main_process(manifest_entry, output_folder, report_path):
         with open(final_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         return final_path, []
+
+    # ----------------------------------------------------------------------
+    # Step 6.5: Text Quality Scoring & Filter
+    # ----------------------------------------------------------------------
+    if cfg.get("text_quality", {}).get("enable", False):
+        logger.info("Step 6.5: Text Quality Scoring & Filter")
+        before_text_quality = list(filtered_list)
+        filtered_list = text_quality_prediction(filtered_list, cfg["text_quality"])
+        filtered_list = filter_by_text_quality(filtered_list, cfg["text_quality"])
+        update_stats(processing_stats, 'text_quality_filter', before_text_quality, filtered_list)
+
+        if not filtered_list:
+            logger.warning(f"All segments filtered out by text quality for {fid}")
+            final_path = os.path.join(save_path, f"{fid}.json")
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            return final_path, []
 
     # ----------------------------------------------------------------------
     # Step 7: Export

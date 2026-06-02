@@ -56,6 +56,11 @@ class PipelineParam:
     refinement_model = None
     refinement_feature_extractor = None
 
+    # text quality
+    ppl_scorer = None
+    spell_checker = None
+    llm_text_scorer = None
+
 
 
 def load_asr_model(cfg, asr_provider, device_name, cli_args):
@@ -343,6 +348,50 @@ def init_pipeline_global(config, cli_args):
     multilingual_flag = cfg["language"]["multilingual"]
     PipelineParam.supported_languages = supported_languages
     PipelineParam.multilingual_flag = multilingual_flag
-    
+
+    # Text Quality Models
+    tq_cfg = cfg.get("text_quality", {})
+    if tq_cfg.get("enable", False):
+        logger.debug(" * Loading Text Quality Models")
+        try:
+            from models.text_quality import (PerplexityScorer, SpellChecker,
+                                             Qwen3OmniTextScorer)
+
+            ppl_cfg = tq_cfg.get("ppl", {})
+            if ppl_cfg.get("enable", False):
+                ppl_model = ppl_cfg.get("model", "Qwen/Qwen2.5-0.5B")
+                ppl_cache = ppl_cfg.get("model_dir_cache", "")
+                ppl_path = ppl_cache if ppl_cache and os.path.exists(ppl_cache) else ppl_model
+                try:
+                    PipelineParam.ppl_scorer = PerplexityScorer(model_path=ppl_path, device=device_name)
+                except Exception as e:
+                    logger.error(f"Failed to load PPL model: {e}")
+                    PipelineParam.ppl_scorer = None
+
+            spell_cfg = tq_cfg.get("spell", {})
+            if spell_cfg.get("enable", False):
+                try:
+                    PipelineParam.spell_checker = SpellChecker()
+                except Exception as e:
+                    logger.error(f"Failed to init SpellChecker: {e}")
+                    PipelineParam.spell_checker = None
+
+            llm_cfg = tq_cfg.get("llm", {})
+            if llm_cfg.get("enable", False):
+                try:
+                    PipelineParam.llm_text_scorer = Qwen3OmniTextScorer(
+                        api_url=llm_cfg.get("api_url", ""),
+                        api_token=llm_cfg.get("api_token", ""),
+                        model_id=llm_cfg.get("model_id", ""),
+                        timeout=llm_cfg.get("timeout", 30),
+                        concurrency=llm_cfg.get("concurrency", 16),
+                        max_retries=llm_cfg.get("max_retries", 2),
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to init Qwen3OmniTextScorer: {e}")
+                    PipelineParam.llm_text_scorer = None
+        except ImportError as e:
+            logger.error(f"Failed to import text quality models: {e}. Disabling text quality.")
+
     torch.set_num_threads(g_args.threads)
     logger.debug(f"Worker {worker_id} finished loading models.")
