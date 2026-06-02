@@ -380,16 +380,16 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
                 "wer": f'{segment.get("wer", 0.):.4f}',
                 "avg_char_duration": f'{segment.get("avg_char_duration", 0.2):.4f}',
             },
-            "metrics_info":{
+            "audio_quality_info":{
                 "dnsmos": f'{segment.get("dnsmos", 0.0):.4f}',
                 "c50": f'{segment.get("c50", 0.0):.4f}',
                 "snr": f'{segment.get("snr", 0.0):.4f}',
             },
             "text_quality_info": {
                 "ppl": f'{segment.get("ppl", -1):.4f}',
-                "semantic_score": f'{segment.get("semantic_score", -1):.4f}',
                 "spell_score": f'{segment.get("spell_score", -1):.4f}',
                 "llm_quality": f'{segment.get("llm_quality", -1):.4f}',
+                "semantic_completeness": f'{segment.get("semantic_completeness", -1):.4f}',
                 "tts_suitability": f'{segment.get("tts_suitability", -1):.4f}',
             }
         }

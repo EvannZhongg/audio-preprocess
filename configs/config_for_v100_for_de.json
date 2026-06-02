@@ -134,14 +134,8 @@
             "model": "Qwen/Qwen2.5-0.5B",
             "model_dir_cache": "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-0.5B"
         },
-        "semantic": {
-            "enable": true,
-            "min_char_count": 3,
-            "require_end_punct": false
-        },
         "spell": {
-            "enable": true,
-            "skip_below_semantic": 0.3
+            "enable": true
         },
         "llm": {
             "enable": true,
@@ -154,9 +148,9 @@
         },
         "thresholds": {
             "ppl_max": 350,
-            "semantic_min": 0.5,
             "spell_min": 0.55,
             "llm_quality_min": 5.0,
+            "semantic_min": 5.0,
             "tts_min": 4.0
         }
     },
