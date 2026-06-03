@@ -179,7 +179,7 @@ def main_process(manifest_entry, output_folder, report_path):
 
     logger.info("Step 4: Post-process VAD")
     audio_dur = len(audio["waveform"]) / audio["sample_rate"]
-    segment_list = cut_by_speaker_label(vad_list_refined, audio_dur, processing_stats, cfg.get("strategy_parameters", {}))
+    segment_list = cut_by_speaker_label(vad_list_refined, audio_dur, processing_stats, cfg.get("strategy_parameters", {}), audio=audio)
 
     # ----------------------------------------------------------------------
     # Step 5: ASR

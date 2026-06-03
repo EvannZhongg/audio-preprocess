@@ -101,7 +101,6 @@
         "merge_gap": 0.4,
         "min_segment_length": 2.0,
         "max_segment_length": 30.0,
-        "target_segment_length": 10.0,
         "strategy": "fixed",
         "fixed_dnsmos_threshold": 2.8,
         "fixed_c50_threshold": 40.0,
