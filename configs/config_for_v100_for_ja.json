@@ -15,7 +15,7 @@
     "validation_asr_provider": "funasr",
     "asr_validation": {
         "enable": true,
-        "wer_threshold": 0.6,
+        "wer_threshold": 0.5,
         "language": "ja"
     },
     "qwen3_asr": {

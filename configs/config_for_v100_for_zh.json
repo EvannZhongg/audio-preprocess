@@ -12,10 +12,10 @@
         ]
     },
     "asr_provider": "qwen3_asr",
-    "validation_asr_provider": "funasr",
+    "validation_asr_provider": "paraformer",
     "asr_validation": {
         "enable": true,
-        "wer_threshold": 0.6,
+        "wer_threshold": 0.15,
         "language": "zh"
     },
     "qwen3_asr": {
