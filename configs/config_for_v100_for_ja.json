@@ -98,7 +98,7 @@
         }
     },
     "strategy_parameters": {
-        "merge_gap": 0.6,
+        "merge_gap": 0.4,
         "min_segment_length": 2.0,
         "max_segment_length": 30.0,
         "strategy": "fixed",
@@ -110,8 +110,8 @@
         "lower_bound_percent": 10,
         "upper_bound_percent": 90,
         "min_char_count": 2.0,
-        "inter_similarity_threshold": 0.69,
-        "intra_similarity_threshold": 0.64,
+        "inter_similarity_threshold": 0.5,
+        "intra_similarity_threshold": 0.68,
         "refinement_batch_size": 256
     },
     "metrics": {
@@ -187,14 +187,6 @@
         "min_silence_ms": 300,
         "thresholds": {
             "abnormal_silence_count_max": 1
-        }
-    },
-    "alignment": {
-        "enable": true,
-        "model_dir_cache": "/root/.cache/huggingface/hub/whisperx-align",
-        "default_language": "ja",
-        "thresholds": {
-            "alignment_score_min": 0.55
         }
     },
     "alignment": {
