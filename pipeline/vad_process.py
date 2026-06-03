@@ -170,6 +170,7 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
     MERGE_GAP = postprocess_cfg.get("merge_gap", 2)   # merge gap in seconds, if smaller than this, merge
     MIN_SEGMENT_LENGTH = postprocess_cfg.get("min_segment_length", 3)  # min segment length in seconds
     MAX_SEGMENT_LENGTH = postprocess_cfg.get("max_segment_length", 30)  # max segment length in seconds
+    TARGET_SEGMENT_LENGTH = postprocess_cfg.get("target_segment_length", 10.0)  # stop merging once a segment reaches this length
     MIN_SIMILARITY = postprocess_cfg.get("intra_similarity_threshold", 0.64) # min similarity between segments
     GRACE_PERIOD_START_S = 0.00
     GRACE_PERIOD_END_S = 0.02
@@ -178,6 +179,7 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
     # --- Internal Statistics ---
     discarded_long_count = 0
     discarded_long_duration = 0.0
+    chunked_long_count = 0
 
     for idx, vad in enumerate(vad_list):
         last_start_time = updated_list[-1]["start"] if updated_list else None
@@ -187,21 +189,32 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
 
         if vad["end"] - vad["start"] >= MAX_SEGMENT_LENGTH:
             duration = vad["end"] - vad["start"]
+            # Don't drop — VAD couldn't find a natural boundary inside this
+            # span (e.g. continuous reading / news broadcast). Hard-chunk it
+            # into roughly-equal pieces below MAX_SEGMENT_LENGTH so downstream
+            # ASR / alignment can still process it.
+            target_chunk_len = MAX_SEGMENT_LENGTH * 0.8
+            n_chunks = max(2, int(np.ceil(duration / target_chunk_len)))
+            chunk_len = duration / n_chunks
             logger.warning(
-
-                f"cut_by_speaker_label > Discarding segment for speaker {vad['speaker']} "
-                f"because its duration ({duration:.2f}s) is longer than "
-                f"MAX_SEGMENT_LENGTH ({MAX_SEGMENT_LENGTH}s)."
+                f"cut_by_speaker_label > Hard-chunking long segment for speaker "
+                f"{vad['speaker']} ({duration:.2f}s > MAX={MAX_SEGMENT_LENGTH}s) "
+                f"into {n_chunks} pieces of ~{chunk_len:.2f}s."
             )
-            # Track discard due to max length
-            discarded_long_count += 1
-            discarded_long_duration += duration
+            for i in range(n_chunks):
+                chunk = vad.copy()
+                chunk["start"] = vad["start"] + i * chunk_len
+                chunk["end"] = vad["start"] + (i + 1) * chunk_len
+                # Last chunk takes any rounding remainder
+                if i == n_chunks - 1:
+                    chunk["end"] = vad["end"]
+                updated_list.append(chunk)
+            chunked_long_count += 1
             continue
 
         if (
             last_speaker is None
             or last_speaker != vad["speaker"]
-            or vad["end"] - vad["start"] >= MIN_SEGMENT_LENGTH
         ):
             updated_list.append(vad)
             continue
@@ -213,13 +226,15 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
         if (
             vad["start"] - last_end_time >= MERGE_GAP
             or vad["end"] - last_start_time >= MAX_SEGMENT_LENGTH
+            or (last_end_time - last_start_time) >= TARGET_SEGMENT_LENGTH
         ):
             updated_list.append(vad)
         else:
             updated_list[-1]["end"] = vad["end"]  # merge the time
 
     logger.debug(
-        f"cut_by_speaker_label > merged {len(vad_list) - len(updated_list)} segments"
+        f"cut_by_speaker_label > merged {len(vad_list) - len(updated_list)} segments; "
+        f"hard-chunked {chunked_long_count} long VAD spans."
     )
 
     # Calculate discards from the final length filtering
@@ -241,6 +256,9 @@ def cut_by_speaker_label(vad_list, audio_duration, stats, postprocess_cfg, step_
     )
 
     # Update the main statistics dictionary
+    # Note: long VAD spans are now hard-chunked rather than discarded, so
+    # discarded_long_count stays 0 by design. Only short segments below
+    # min_segment_length are dropped here.
     stats['steps'][step_name]['discarded_count'] = discarded_long_count + discarded_short_count
     stats['steps'][step_name]['discarded_duration'] = discarded_long_duration + discarded_short_duration
 
