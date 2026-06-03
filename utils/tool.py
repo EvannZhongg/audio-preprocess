@@ -379,6 +379,9 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
                 "norm_text": segment.get("norm_text", ""),
                 "wer": f'{segment.get("wer", 0.):.4f}',
                 "avg_char_duration": f'{segment.get("avg_char_duration", 0.2):.4f}',
+                "speaking_rate": f'{segment.get("speaking_rate", -1):.4f}',
+                "alignment_score": f'{segment.get("alignment_score", -1):.4f}',
+                "abnormal_silence_count": int(segment.get("abnormal_silence_count", -1)),
             },
             "audio_quality_info":{
                 "dnsmos": f'{segment.get("dnsmos", 0.0):.4f}',
@@ -391,7 +394,12 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
                 "llm_quality": f'{segment.get("llm_quality", -1):.4f}',
                 "semantic_completeness": f'{segment.get("semantic_completeness", -1):.4f}',
                 "tts_suitability": f'{segment.get("tts_suitability", -1):.4f}',
-            }
+            },
+            "domain_info": segment.get("domain_info", {
+                "text_domain": {"domain": "unknown", "scenario": "unknown", "style": "unknown"},
+                "acoustic_domain": {"environment": "unknown", "background": "unknown", "quality": "unknown"},
+                "speaker_domain": {"gender": "unknown", "age_group": "unknown", "accent": "unknown"},
+            })
         }
         meta_info.add_sentence(setence_metadata)
 

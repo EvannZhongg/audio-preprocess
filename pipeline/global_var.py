@@ -61,6 +61,12 @@ class PipelineParam:
     spell_checker = None
     llm_text_scorer = None
 
+    # domain annotation
+    domain_classifier = None
+
+    # forced alignment (whisperx)
+    aligner = None
+
 
 
 def load_asr_model(cfg, asr_provider, device_name, cli_args):
@@ -392,6 +398,54 @@ def init_pipeline_global(config, cli_args):
                     PipelineParam.llm_text_scorer = None
         except ImportError as e:
             logger.error(f"Failed to import text quality models: {e}. Disabling text quality.")
+
+    # Domain Classifier
+    da_cfg = cfg.get("domain_annotation", {})
+    if da_cfg.get("enable", False):
+        logger.debug(" * Loading Domain Classifier")
+        try:
+            from models.domain_classifier import Qwen3OmniDomainClassifier
+            from utils.domain_enums import (resolve_acoustic_enums,
+                                            resolve_speaker_enums,
+                                            resolve_text_enums)
+
+            llm_cfg = da_cfg.get("llm", {})
+            text_enums = resolve_text_enums(da_cfg.get("text_domain", {}))
+            acoustic_enums = resolve_acoustic_enums(da_cfg.get("acoustic_domain", {}))
+            speaker_enums = resolve_speaker_enums(da_cfg.get("speaker_domain", {}))
+            try:
+                PipelineParam.domain_classifier = Qwen3OmniDomainClassifier(
+                    api_url=llm_cfg.get("api_url", ""),
+                    api_token=llm_cfg.get("api_token", ""),
+                    model_id=llm_cfg.get("model_id", ""),
+                    text_enums=text_enums,
+                    acoustic_enums=acoustic_enums,
+                    speaker_enums=speaker_enums,
+                    timeout=llm_cfg.get("timeout", 60),
+                    max_retries=llm_cfg.get("max_retries", 2),
+                )
+            except Exception as e:
+                logger.error(f"Failed to init Qwen3OmniDomainClassifier: {e}")
+                PipelineParam.domain_classifier = None
+        except ImportError as e:
+            logger.error(f"Failed to import domain classifier: {e}. Disabling domain annotation.")
+
+    # Forced Alignment (WhisperX)
+    al_cfg = cfg.get("alignment", {})
+    if al_cfg.get("enable", False):
+        logger.debug(" * Loading WhisperX Aligner")
+        try:
+            from models.alignment import WhisperXAligner
+            try:
+                PipelineParam.aligner = WhisperXAligner(
+                    device=device_name,
+                    model_dir=al_cfg.get("model_dir_cache"),
+                )
+            except Exception as e:
+                logger.error(f"Failed to init WhisperXAligner: {e}")
+                PipelineParam.aligner = None
+        except ImportError as e:
+            logger.error(f"Failed to import WhisperXAligner: {e}. Disabling alignment.")
 
     torch.set_num_threads(g_args.threads)
     logger.debug(f"Worker {worker_id} finished loading models.")

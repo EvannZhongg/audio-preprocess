@@ -154,5 +154,56 @@
             "tts_min": 4.0
         }
     },
+    "domain_annotation": {
+        "enable": true,
+        "text_domain": {
+            "enable": true
+        },
+        "acoustic_domain": {
+            "enable": true,
+            "audio_sample_seconds": 30
+        },
+        "speaker_domain": {
+            "enable": true,
+            "audio_sample_seconds": 15
+        },
+        "llm": {
+            "api_url": "http://v2.open.venus.oa.com/llmproxy/chat/completions",
+            "api_token": "Q3jOs0HJM5tQfJFIDxKvJzAl@4114",
+            "model_id": "server:272349",
+            "timeout": 60,
+            "max_retries": 2
+        }
+    },
+    "speaking_rate": {
+        "enable": true,
+        "thresholds": {
+            "speaking_rate_min": 4.0,
+            "speaking_rate_max": 16.0
+        }
+    },
+    "silence_filter": {
+        "enable": true,
+        "min_silence_ms": 300,
+        "thresholds": {
+            "abnormal_silence_count_max": 1
+        }
+    },
+    "alignment": {
+        "enable": true,
+        "model_dir_cache": "/root/.cache/huggingface/hub/whisperx-align",
+        "default_language": "fr",
+        "thresholds": {
+            "alignment_score_min": 0.60
+        }
+    },
+    "alignment": {
+        "enable": true,
+        "model_dir_cache": "/root/.cache/huggingface/hub/whisperx-align",
+        "default_language": "fr",
+        "thresholds": {
+            "alignment_score_min": 0.60
+        }
+    },
     "huggingface_token": "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"
 }
