@@ -12,10 +12,10 @@
         ]
     },
     "asr_provider": "qwen3_asr",
-    "validation_asr_provider": "funasr",
+    "validation_asr_provider": "funasr_nano",
     "asr_validation": {
         "enable": true,
-        "wer_threshold": 0.5,
+        "wer_threshold": 0.4,
         "language": "ko"
     },
     "qwen3_asr": {
