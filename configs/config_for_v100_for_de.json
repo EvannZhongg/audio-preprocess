@@ -99,7 +99,7 @@
     },
     "strategy_parameters": {
         "merge_gap": 0.5,
-        "min_segment_length": 2.0,
+        "min_segment_length": 1.5,
         "max_segment_length": 30.0,
         "strategy": "fixed",
         "fixed_dnsmos_threshold": 2.8,

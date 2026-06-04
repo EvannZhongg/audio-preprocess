@@ -6,6 +6,12 @@ USER root
 LABEL MAINTAINER="allenxzhang"
 
 RUN yum install -y vim net-tools lrzsz sox sox-devel
+# Java 17+ is required by language-tool-python's LanguageTool 6.8+
+# (used by text_quality.spell_score). Without it spell scoring silently
+# degrades to -1.
+RUN yum install -y java-17-openjdk java-17-openjdk-devel
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 
 # Install miniforge
