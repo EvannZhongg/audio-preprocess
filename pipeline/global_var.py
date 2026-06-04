@@ -6,24 +6,46 @@ import torch
 import yaml
 
 # ----------------------------------------------------------------------
-# Compatibility shim: pyannote.audio<=3.3.x references
-# `torchaudio.AudioMetaData` at module top-level, but torchaudio>=2.2.0
-# moved that class under `torchaudio.io`. Without this patch, importing
-# pyannote raises:
+# Compatibility shim: pyannote.audio<=3.3.x references several
+# torchaudio top-level symbols that newer torchaudio (>=2.2 / >=2.5)
+# either moved or removed:
+#   - torchaudio.AudioMetaData       (moved to torchaudio.io)
+#   - torchaudio.list_audio_backends (deprecated/relocated)
+#   - torchaudio.get_audio_backend / set_audio_backend (deprecated)
+# Without this patch, importing pyannote raises one of:
 #   AttributeError: module 'torchaudio' has no attribute 'AudioMetaData'
-# Fix it before pyannote is imported anywhere in this process.
+#   AttributeError: module 'torchaudio' has no attribute 'list_audio_backends'
+# Restore each missing symbol to its old location BEFORE pyannote loads.
 # ----------------------------------------------------------------------
 import torchaudio as _ta
+
+# 1. AudioMetaData
 if not hasattr(_ta, "AudioMetaData"):
     try:
         from torchaudio.io import AudioMetaData as _AMD
         _ta.AudioMetaData = _AMD
     except Exception:
-        # Last-resort fallback: create a stub so the type annotation
-        # in pyannote/audio/core/io.py doesn't crash at import time.
         class _AMD:
             pass
         _ta.AudioMetaData = _AMD
+
+# 2. list_audio_backends — pyannote calls this to verify a backend is
+# present; we statically declare the backends our env provides
+# (soundfile is in requirements.txt; sox via libsox-dev in dockerfile).
+if not hasattr(_ta, "list_audio_backends"):
+    def _list_audio_backends():
+        # Stub returning the backends that are realistically available.
+        # pyannote only checks for membership ("soundfile" in backends),
+        # so an explicit list is safe.
+        return ["soundfile", "sox_io", "sox"]
+    _ta.list_audio_backends = _list_audio_backends
+
+# 3. get_audio_backend / set_audio_backend — older pyannote versions
+# may probe these; provide harmless no-ops.
+if not hasattr(_ta, "get_audio_backend"):
+    _ta.get_audio_backend = lambda: "soundfile"
+if not hasattr(_ta, "set_audio_backend"):
+    _ta.set_audio_backend = lambda *a, **k: None
 
 from pyannote.audio import Pipeline
 
