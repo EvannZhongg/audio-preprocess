@@ -35,8 +35,11 @@ RUN yum install -y git
 RUN mkdir -p /home/oicq
 WORKDIR /home/oicq
 
-# Cache bust: change this value to force re-clone
-ARG CACHEBUST=1
+# Cache bust: change this value before each build to force re-clone of
+# the git repo. Without this, BuildKit will reuse the cached `git clone`
+# layer even with `docker build --no-cache`, and the image ends up
+# pinned to a stale commit. Bump the date string every time you build.
+ARG CACHEBUST=20260605
 RUN git clone -b allenxzhang https://private:H73arudJEAnEEUDU-Pl3@git.woa.com/ConversationalAI/audio-preprocess.git
 RUN cp -r /home/oicq/audio-preprocess /home/oicq/audio_preprocess
 # COPY . /home/oicq/audio_preprocess
