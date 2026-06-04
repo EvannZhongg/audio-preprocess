@@ -131,8 +131,8 @@
         "enable": true,
         "ppl": {
             "enable": true,
-            "model": "Qwen/Qwen2.5-0.5B",
-            "model_dir_cache": "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-0.5B"
+            "model": "Qwen/Qwen3-0.6B",
+            "model_dir_cache": "/root/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B"
         },
         "spell": {
             "enable": true
@@ -147,7 +147,7 @@
             "max_retries": 2
         },
         "thresholds": {
-            "ppl_max": 300,
+            "ppl_max": 240,
             "spell_min": 0.3,
             "llm_quality_min": 5.0,
             "semantic_min": 5.0,

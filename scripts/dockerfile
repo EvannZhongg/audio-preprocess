@@ -45,11 +45,14 @@ RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./co
 # Pre-download ASR models needed by other languages' validation_asr_provider:
 #   - paraformer (used by zh validation)
 #   - whisper    (used by en validation)
-# funasr_nano + all common models (pyannote, SMRU, WhisperX, Qwen2.5-0.5B,
-# DNSMOS/Brouhaha, ERes2Net, silero-vad) are already cached by the russian
-# config above, so each subsequent run only fetches the new ASR backend.
+# funasr_nano + all common models (pyannote, SMRU, WhisperX, DNSMOS/Brouhaha,
+# ERes2Net, silero-vad) are already cached by the russian config above, so
+# each subsequent run only fetches the new ASR backend.
 RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_zh.json
 RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_en.json
+# Pre-download Qwen3-0.6B for PPL scoring (text_quality.ppl). Worker nodes
+# have no outbound network, so this must be cached at build time.
+RUN conda run -n AudioPipeline python scripts/download_qwen3_06b.py
 
 # Set proxy environment variables
 ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
