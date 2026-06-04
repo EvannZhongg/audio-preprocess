@@ -34,7 +34,10 @@ whisperx>=3.3.0
 jiwer==4.0.0
 
 # LLM-based scoring (PPL via Qwen3-0.6B + LLM API for text/domain quality)
-transformers>=4.45.0
+# transformers upper-bound: 4.55+ requires torch>=2.7 for FP8 dtypes
+# (torch.float8_e8m0fnu); we ship torch=2.5.0 in dockerfile, so cap at <4.55.
+# 4.51 is the lowest version with Qwen3 architecture support.
+transformers>=4.51,<4.55
 huggingface_hub>=0.24.0
 requests>=2.31.0
 
