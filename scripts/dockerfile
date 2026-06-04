@@ -31,7 +31,7 @@ WORKDIR /home/oicq
 
 # Cache bust: change this value to force re-clone
 ARG CACHEBUST=1
-RUN git clone -b allenxzhang https://private:_QE-P04-_yUclgfW_WKG@git.woa.com/ConversationalAI/audio-preprocess.git
+RUN git clone -b allenxzhang https://private:H73arudJEAnEEUDU-Pl3@git.woa.com/ConversationalAI/audio-preprocess.git
 RUN cp -r /home/oicq/audio-preprocess /home/oicq/audio_preprocess
 # COPY . /home/oicq/audio_preprocess
 WORKDIR /home/oicq/audio_preprocess
@@ -42,6 +42,14 @@ RUN conda run -n AudioPipeline python -m pip install -r requirements.txt
 RUN conda run -n AudioPipeline python -m pip install --upgrade funasr
 RUN conda run -n AudioPipeline python -m pip install onnxruntime-gpu==1.19.2
 RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_russian.json
+# Pre-download ASR models needed by other languages' validation_asr_provider:
+#   - paraformer (used by zh validation)
+#   - whisper    (used by en validation)
+# funasr_nano + all common models (pyannote, SMRU, WhisperX, Qwen2.5-0.5B,
+# DNSMOS/Brouhaha, ERes2Net, silero-vad) are already cached by the russian
+# config above, so each subsequent run only fetches the new ASR backend.
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_zh.json
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_en.json
 
 # Set proxy environment variables
 ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
