@@ -191,7 +191,7 @@
     },
     "alignment": {
         "enable": true,
-        "model_dir_cache": "/root/.cache/huggingface/hub/whisperx-align",
+        "model_dir_cache": null,
         "default_language": "en",
         "thresholds": {
             "alignment_score_min": 0.65

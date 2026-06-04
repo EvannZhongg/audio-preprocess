@@ -52,6 +52,10 @@ RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./co
 # Pre-download Qwen3-0.6B for PPL scoring (text_quality.ppl). Worker nodes
 # have no outbound network, so this must be cached at build time.
 RUN conda run -n AudioPipeline python scripts/download_qwen3_06b.py
+# Pre-download WhisperX wav2vec2 alignment models for all 7 supported
+# languages (~7-8 GB total). Without this, alignment_score is -1
+# everywhere because workers can't reach HuggingFace.
+RUN conda run -n AudioPipeline python scripts/download_whisperx_align.py
 
 # Set proxy environment variables
 ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
