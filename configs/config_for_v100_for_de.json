@@ -196,7 +196,7 @@
         "language_models": {
             "zh": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-chinese-zh-cn",
             "en": "/root/.cache/huggingface/hub/models--facebook--wav2vec2-base-960h",
-            "fr": "/root/.cache/huggingface/hub/models--voidful--wav2vec2-xlsr-multilingual-56",
+            "fr": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-french",
             "ja": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-japanese",
             "ko": "/root/.cache/huggingface/hub/models--kresnik--wav2vec2-large-xlsr-korean",
             "de": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-german",
