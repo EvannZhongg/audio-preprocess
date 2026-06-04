@@ -147,7 +147,7 @@
             "max_retries": 2
         },
         "thresholds": {
-            "ppl_max": 200,
+            "ppl_max": 1000,
             "spell_min": 0.4,
             "llm_quality_min": 5.0,
             "semantic_min": 5.0,
