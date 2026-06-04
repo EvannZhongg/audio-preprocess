@@ -4,6 +4,27 @@ import uuid
 
 import torch
 import yaml
+
+# ----------------------------------------------------------------------
+# Compatibility shim: pyannote.audio<=3.3.x references
+# `torchaudio.AudioMetaData` at module top-level, but torchaudio>=2.2.0
+# moved that class under `torchaudio.io`. Without this patch, importing
+# pyannote raises:
+#   AttributeError: module 'torchaudio' has no attribute 'AudioMetaData'
+# Fix it before pyannote is imported anywhere in this process.
+# ----------------------------------------------------------------------
+import torchaudio as _ta
+if not hasattr(_ta, "AudioMetaData"):
+    try:
+        from torchaudio.io import AudioMetaData as _AMD
+        _ta.AudioMetaData = _AMD
+    except Exception:
+        # Last-resort fallback: create a stub so the type annotation
+        # in pyannote/audio/core/io.py doesn't crash at import time.
+        class _AMD:
+            pass
+        _ta.AudioMetaData = _AMD
+
 from pyannote.audio import Pipeline
 
 from models import (brouhaha_metrics, dnsmos, funasr_asr, separate_fast,
