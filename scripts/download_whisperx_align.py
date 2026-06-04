@@ -32,7 +32,7 @@ import time
 DEFAULT_HF_MODELS = {
     "zh": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
     "en": "facebook/wav2vec2-base-960h",
-    "fr": "voidful/wav2vec2-xlsr-multilingual-56",
+    "fr": "jonatasgrosman/wav2vec2-large-xlsr-53-french",
     "ja": "jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
     "ko": "kresnik/wav2vec2-large-xlsr-korean",
     "de": "jonatasgrosman/wav2vec2-large-xlsr-53-german",
@@ -79,10 +79,12 @@ def download_hf_repo(repo: str, cache_dir: str) -> bool:
             ignore_patterns=["*.gguf", "*.onnx", "*.msgpack", "*.h5", "*.tflite"],
         )
         elapsed = time.time() - t0
+        # snapshot dirs use symlinks pointing to ../../blobs/<hash>; follow
+        # the symlinks so size reflects real downloaded weights.
         size = sum(
-            os.path.getsize(os.path.join(dp, f))
+            os.path.getsize(os.path.realpath(os.path.join(dp, f)))
             for dp, _, files in os.walk(local)
-            for f in files if not os.path.islink(os.path.join(dp, f))
+            for f in files
         ) / 1024 / 1024
         print(f"  [OK] {size:.1f} MB in {elapsed:.1f}s → {local}")
         return True
@@ -95,8 +97,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache-dir",
-                    default=os.path.expanduser("~/.cache/huggingface"),
-                    help="HF cache root (default: ~/.cache/huggingface)")
+                    default=os.path.expanduser("~/.cache/huggingface/hub"),
+                    help="HF hub cache root (default: ~/.cache/huggingface/hub). "
+                         "Files land at <cache-dir>/models--<org>--<name>/...")
     ap.add_argument("--langs",
                     default="zh,en,fr,ja,ko,de,ru",
                     help="Comma-separated languages to download (default: all 7)")

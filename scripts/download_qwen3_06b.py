@@ -30,9 +30,19 @@ MODEL_ID = "Qwen/Qwen3-0.6B"
 
 
 def _expected_path(cache_dir: str) -> str:
-    # HF caches under hub/models--<org>--<name>
+    """Expected snapshot-repo dir under cache_dir.
+
+    Accept both forms of cache_dir:
+      - ~/.cache/huggingface/hub  (already the hub dir)
+      - ~/.cache/huggingface       (parent of hub/)
+    """
     safe = MODEL_ID.replace("/", "--")
-    return os.path.join(cache_dir, "hub", f"models--{safe}")
+    repo_dir = f"models--{safe}"
+    # If user passed parent dir, descend into hub/.
+    if os.path.basename(cache_dir.rstrip("/")) != "hub" and \
+       os.path.isdir(os.path.join(cache_dir, "hub")):
+        return os.path.join(cache_dir, "hub", repo_dir)
+    return os.path.join(cache_dir, repo_dir)
 
 
 def _is_cached(cache_dir: str) -> bool:
@@ -88,10 +98,11 @@ def download(cache_dir: str, revision: str, use_mirror: bool):
             ignore_patterns=["*.gguf", "*.onnx", "*.msgpack"],
         )
         elapsed = time.time() - t0
+        # Follow symlinks (snapshot dirs use them to point at blobs/<hash>).
         size = sum(
-            os.path.getsize(os.path.join(dp, f))
+            os.path.getsize(os.path.realpath(os.path.join(dp, f)))
             for dp, _, files in os.walk(local)
-            for f in files if not os.path.islink(os.path.join(dp, f))
+            for f in files
         ) / 1024 / 1024
         print(f"\n[OK] downloaded {size:.1f} MB in {elapsed:.1f}s")
         print(f"     snapshot path: {local}")
@@ -112,8 +123,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cache-dir",
-                    default=os.path.expanduser("~/.cache/huggingface"),
-                    help="HuggingFace cache root (default: ~/.cache/huggingface)")
+                    default=os.path.expanduser("~/.cache/huggingface/hub"),
+                    help="HF hub cache root (default: ~/.cache/huggingface/hub)")
     ap.add_argument("--revision", default="main",
                     help="Git revision/branch/tag to download (default: main)")
     ap.add_argument("--hf-mirror", action="store_true",
