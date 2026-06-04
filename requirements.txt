@@ -20,14 +20,24 @@ addict
 datasets
 einops
 scikit-learn
+scipy
+
 # ASR Models
 # openai-whisper
-# google-generativeai
-funasr==1.2.4
+google-generativeai
+# funasr: must be >=1.3 for Fun-ASR-MLT-Nano-2512 support.
+# (We previously pinned 1.2.4 then upgraded in dockerfile; consolidated here.)
+funasr>=1.3.0
 aiohttp==3.9.2
 faster-whisper==1.1.0
 whisperx>=3.3.0
 jiwer==4.0.0
+
+# LLM-based scoring (PPL via Qwen3-0.6B + LLM API for text/domain quality)
+transformers>=4.45.0
+huggingface_hub>=0.24.0
+requests>=2.31.0
+
 # Audio-quality metrics
 ./third_party/brouhaha-vad-main.zip
 
@@ -39,7 +49,6 @@ pandas
 openpyxl
 
 # MFA & ASR Validation
-# jiwer
 # praatio
 
 # Utilities
