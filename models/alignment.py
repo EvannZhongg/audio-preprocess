@@ -28,37 +28,91 @@ logger = logging.getLogger(__name__)
 class WhisperXAligner:
     """Lazy multi-language WhisperX wrapper."""
 
-    def __init__(self, device: str = "cuda", model_dir: Optional[str] = None):
+    def __init__(
+        self,
+        device: str = "cuda",
+        model_dir: Optional[str] = None,
+        language_models: Optional[Dict[str, str]] = None,
+    ):
         """
         Args:
             device: torch device string, e.g. "cuda", "cuda:0", "cpu"
-            model_dir: optional HuggingFace cache root for align models.
-                If provided AND it exists, we set HF_HUB_CACHE +
-                TRANSFORMERS_CACHE to it and switch to offline mode so
-                whisperx loads the per-language wav2vec2 models from local
-                cache instead of phoning home to huggingface.co.
-                Accepts either ".../huggingface" (parent of hub/) or
-                ".../hub" (already the hub dir).
+            model_dir: legacy passthrough — forwarded to whisperx as cache_dir
+                if no per-language path matches.
+            language_models: dict of {lang_code: local_path}. Each path may be
+                either a HF cache repo root ("models--<org>--<name>") or an
+                already-resolved snapshot dir. The class auto-resolves repo
+                roots to their snapshot dir before handing to from_pretrained.
+                Languages absent from this dict fall back to whisperx's
+                default HF repo id (which requires network).
         """
-        import os
-
         self.device = device
         self.model_dir = model_dir
+        self.language_models = self._normalize_language_models(language_models or {})
         self._models: Dict[str, Tuple[object, dict]] = {}
         self._failed_langs = set()
         self._lock = threading.Lock()
+        if self.language_models:
+            logger.info(
+                f"WhisperXAligner: per-language local paths configured for "
+                f"{sorted(self.language_models.keys())}"
+            )
 
-        if model_dir and os.path.isdir(model_dir):
-            # Normalize: if a parent ".../huggingface" was passed, descend
-            # into its hub/ subdir. Otherwise assume model_dir IS the hub.
-            hub_dir = model_dir
-            if os.path.isdir(os.path.join(model_dir, "hub")):
-                hub_dir = os.path.join(model_dir, "hub")
-            os.environ["HF_HUB_CACHE"] = hub_dir
-            os.environ["TRANSFORMERS_CACHE"] = hub_dir
-            os.environ["HF_HUB_OFFLINE"] = "1"
-            os.environ["TRANSFORMERS_OFFLINE"] = "1"
-            logger.info(f"WhisperXAligner: HF cache → {hub_dir} (offline mode)")
+    @staticmethod
+    def _normalize_language_models(mapping: Dict[str, str]) -> Dict[str, str]:
+        """Resolve any HF cache repo-root paths to their snapshot subdirectory.
+
+        Accepts both forms; HuggingFace cache layout is:
+            <hub>/models--<org>--<name>/snapshots/<commit>/{config.json,...}
+        from_pretrained() with a local path expects a directory directly
+        containing config.json — i.e. the snapshot dir.
+        """
+        import os
+
+        resolved = {}
+        for lang, path in mapping.items():
+            if not path:
+                continue
+            if not os.path.isabs(path):
+                # Treat as HF repo id; pass through unchanged.
+                resolved[lang] = path
+                continue
+            # Already resolved snapshot dir?
+            if os.path.isfile(os.path.join(path, "config.json")):
+                resolved[lang] = path
+                continue
+            # Repo root with snapshots/ inside?
+            snap = os.path.join(path, "snapshots")
+            if os.path.isdir(snap):
+                ref_main = os.path.join(path, "refs", "main")
+                chosen = None
+                if os.path.isfile(ref_main):
+                    try:
+                        commit = open(ref_main).read().strip()
+                        candidate = os.path.join(snap, commit)
+                        if os.path.isfile(os.path.join(candidate, "config.json")):
+                            chosen = candidate
+                    except Exception:
+                        pass
+                if chosen is None:
+                    for d in sorted(os.listdir(snap)):
+                        candidate = os.path.join(snap, d)
+                        if os.path.isfile(os.path.join(candidate, "config.json")):
+                            chosen = candidate
+                            break
+                if chosen:
+                    logger.info(f"WhisperXAligner: resolved {lang} → {chosen}")
+                    resolved[lang] = chosen
+                else:
+                    logger.warning(
+                        f"WhisperXAligner: {lang} path {path} has snapshots/ "
+                        f"but no usable commit; falling back to default repo id"
+                    )
+            else:
+                # Path exists but neither a snapshot dir nor a repo root — pass
+                # through and let from_pretrained surface the error.
+                resolved[lang] = path
+        return resolved
 
     def _get_model(self, language: str) -> Tuple[Optional[object], Optional[dict]]:
         """Return (model, metadata) for language, or (None, None) on failure."""
@@ -69,12 +123,17 @@ class WhisperXAligner:
                 return self._models[language]
             try:
                 import whisperx
-                logger.info(f"Loading WhisperX align model for language: {language}")
-                # Don't pass model_dir to whisperx — we already redirected HF
-                # cache via env vars in __init__, and whisperx's model_dir
-                # behavior (treating it as cache_dir) would create a parallel
-                # download path that doesn't exist on offline workers.
                 kwargs = {"language_code": language, "device": self.device}
+                # If a local path was configured for this language, force
+                # whisperx to use it as model_name — skips HF lookup entirely.
+                local_path = self.language_models.get(language)
+                if local_path:
+                    logger.info(f"Loading WhisperX align model for {language} from {local_path}")
+                    kwargs["model_name"] = local_path
+                else:
+                    logger.info(f"Loading WhisperX align model for {language} (default repo)")
+                    if self.model_dir:
+                        kwargs["model_dir"] = self.model_dir
                 model_a, metadata = whisperx.load_align_model(**kwargs)
                 self._models[language] = (model_a, metadata)
                 return model_a, metadata

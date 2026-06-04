@@ -25,19 +25,19 @@ import sys
 import time
 
 # Mirror of whisperx.alignment.DEFAULT_ALIGN_MODELS_HF for our 7 languages.
-# Special case: 'en' uses a torchaudio bundle (WAV2VEC2_ASR_BASE_960H)
-# which downloads via torch.hub, not HuggingFace.
+# Note: we use facebook/wav2vec2-base-960h for `en` instead of the torchaudio
+# bundle WAV2VEC2_ASR_BASE_960H — same underlying model but distributed via
+# HF, which lets us manage all 7 languages in one cache and pin per-language
+# local paths in config.
 DEFAULT_HF_MODELS = {
     "zh": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn",
+    "en": "facebook/wav2vec2-base-960h",
     "fr": "voidful/wav2vec2-xlsr-multilingual-56",
     "ja": "jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
     "ko": "kresnik/wav2vec2-large-xlsr-korean",
     "de": "jonatasgrosman/wav2vec2-large-xlsr-53-german",
     "ru": "jonatasgrosman/wav2vec2-large-xlsr-53-russian",
 }
-
-# `en` is a torchaudio bundle, downloaded separately.
-EN_BUNDLE_NAME = "WAV2VEC2_ASR_BASE_960H"
 
 
 def _safe_repo_dir(cache_dir: str, repo: str) -> str:
@@ -91,28 +91,6 @@ def download_hf_repo(repo: str, cache_dir: str) -> bool:
         return False
 
 
-def download_en_bundle() -> bool:
-    """`en` uses torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H (~360 MB)."""
-    print(f"\n=== {EN_BUNDLE_NAME} (torchaudio bundle) ===")
-    try:
-        import torch
-        import torchaudio
-    except ImportError as e:
-        print(f"  ERROR: {e}")
-        return False
-    try:
-        t0 = time.time()
-        bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H
-        # get_model() downloads weights to torch hub cache
-        _ = bundle.get_model()
-        print(f"  [OK] downloaded in {time.time() - t0:.1f}s "
-              f"→ ~/.cache/torch/hub/checkpoints/")
-        return True
-    except Exception as e:
-        print(f"  [FAIL] {type(e).__name__}: {e}")
-        return False
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -139,10 +117,7 @@ def main():
 
     failed = []
     for lang in langs:
-        if lang == "en":
-            if not download_en_bundle():
-                failed.append("en (torchaudio WAV2VEC2_ASR_BASE_960H)")
-        elif lang in DEFAULT_HF_MODELS:
+        if lang in DEFAULT_HF_MODELS:
             repo = DEFAULT_HF_MODELS[lang]
             if not download_hf_repo(repo, args.cache_dir):
                 failed.append(f"{lang} ({repo})")

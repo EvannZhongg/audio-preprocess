@@ -193,6 +193,15 @@
         "enable": true,
         "model_dir_cache": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub",
         "default_language": "en",
+        "language_models": {
+            "zh": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-chinese-zh-cn",
+            "en": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--facebook--wav2vec2-base-960h",
+            "fr": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--voidful--wav2vec2-xlsr-multilingual-56",
+            "ja": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-japanese",
+            "ko": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--kresnik--wav2vec2-large-xlsr-korean",
+            "de": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-german",
+            "ru": "/cfs/cfs-czb184s7/allenxzhang/models/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-russian"
+        },
         "thresholds": {
             "alignment_score_min": 0.65
         }

@@ -483,6 +483,7 @@ def init_pipeline_global(config, cli_args):
                 PipelineParam.aligner = WhisperXAligner(
                     device=device_name,
                     model_dir=al_cfg.get("model_dir_cache"),
+                    language_models=al_cfg.get("language_models", {}),
                 )
             except Exception as e:
                 logger.error(f"Failed to init WhisperXAligner: {e}")
