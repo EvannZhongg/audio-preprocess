@@ -32,13 +32,33 @@ class WhisperXAligner:
         """
         Args:
             device: torch device string, e.g. "cuda", "cuda:0", "cpu"
-            model_dir: optional cache dir for align models
+            model_dir: optional HuggingFace cache root for align models.
+                If provided AND it exists, we set HF_HUB_CACHE +
+                TRANSFORMERS_CACHE to it and switch to offline mode so
+                whisperx loads the per-language wav2vec2 models from local
+                cache instead of phoning home to huggingface.co.
+                Accepts either ".../huggingface" (parent of hub/) or
+                ".../hub" (already the hub dir).
         """
+        import os
+
         self.device = device
         self.model_dir = model_dir
         self._models: Dict[str, Tuple[object, dict]] = {}
         self._failed_langs = set()
         self._lock = threading.Lock()
+
+        if model_dir and os.path.isdir(model_dir):
+            # Normalize: if a parent ".../huggingface" was passed, descend
+            # into its hub/ subdir. Otherwise assume model_dir IS the hub.
+            hub_dir = model_dir
+            if os.path.isdir(os.path.join(model_dir, "hub")):
+                hub_dir = os.path.join(model_dir, "hub")
+            os.environ["HF_HUB_CACHE"] = hub_dir
+            os.environ["TRANSFORMERS_CACHE"] = hub_dir
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
+            logger.info(f"WhisperXAligner: HF cache → {hub_dir} (offline mode)")
 
     def _get_model(self, language: str) -> Tuple[Optional[object], Optional[dict]]:
         """Return (model, metadata) for language, or (None, None) on failure."""
@@ -50,9 +70,11 @@ class WhisperXAligner:
             try:
                 import whisperx
                 logger.info(f"Loading WhisperX align model for language: {language}")
+                # Don't pass model_dir to whisperx — we already redirected HF
+                # cache via env vars in __init__, and whisperx's model_dir
+                # behavior (treating it as cache_dir) would create a parallel
+                # download path that doesn't exist on offline workers.
                 kwargs = {"language_code": language, "device": self.device}
-                if self.model_dir:
-                    kwargs["model_dir"] = self.model_dir
                 model_a, metadata = whisperx.load_align_model(**kwargs)
                 self._models[language] = (model_a, metadata)
                 return model_a, metadata
