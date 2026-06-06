@@ -11,7 +11,7 @@
             "ru"
         ]
     },
-    "asr_provider": "qwen3_asr",
+    "asr_provider": "funasr_nano",
     "validation_asr_provider": "paraformer",
     "asr_validation": {
         "enable": true,
