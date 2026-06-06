@@ -128,7 +128,7 @@
         "primary_model_path": "ckpts/sig_bak_ovr.onnx"
     },
     "text_quality": {
-        "enable": true,
+        "enable": false,
         "ppl": {
             "enable": true,
             "model": "Qwen/Qwen3-0.6B",
@@ -155,7 +155,7 @@
         }
     },
     "domain_annotation": {
-        "enable": true,
+        "enable": false,
         "text_domain": {
             "enable": true
         },
