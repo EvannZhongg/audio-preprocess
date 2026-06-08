@@ -94,7 +94,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 8
+            "batch_size": 9
         }
     },
     "strategy_parameters": {
@@ -203,7 +203,7 @@
             "ru": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-russian"
         },
         "thresholds": {
-            "alignment_score_min": 0.60
+            "alignment_score_min": 0.6
         }
     },
     "huggingface_token": "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"
