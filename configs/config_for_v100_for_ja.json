@@ -29,7 +29,7 @@
         "model_dir_cache": "/root/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-MLT-Nano-2512",
         "vad_model": "fsmn-vad",
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-        "batch_size": 32
+        "batch_size": 16
     },
     "funasr": {
         "model": "iic/SenseVoiceSmall",
@@ -94,7 +94,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 10
+            "batch_size": 8
         }
     },
     "strategy_parameters": {
