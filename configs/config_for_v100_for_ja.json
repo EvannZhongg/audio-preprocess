@@ -155,7 +155,7 @@
         }
     },
     "domain_annotation": {
-        "enable": true,
+        "enable": false,
         "text_domain": {
             "enable": true
         },
