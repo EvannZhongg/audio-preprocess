@@ -15,7 +15,7 @@
     "validation_asr_provider": "whisper",
     "asr_validation": {
         "enable": true,
-        "wer_threshold": 0.15,
+        "wer_threshold": 0.18,
         "language": "en"
     },
     "qwen3_asr": {
@@ -51,7 +51,7 @@
         "model": "Systran/faster-distil-whisper-large-v3",
         "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
         "compute_type": "float16",
-        "batch_size": 12
+        "batch_size": 16
     },
     "diarization_provider": "pyannote",
     "pyannote": {
@@ -128,7 +128,7 @@
         "primary_model_path": "ckpts/sig_bak_ovr.onnx"
     },
     "text_quality": {
-        "enable": true,
+        "enable": false,
         "ppl": {
             "enable": true,
             "model": "Qwen/Qwen3-0.6B",
@@ -176,10 +176,10 @@
         }
     },
     "speaking_rate": {
-        "enable": true,
+        "enable": false,
         "thresholds": {
-            "speaking_rate_min": 4.0,
-            "speaking_rate_max": 16.0
+            "speaking_rate_min": 2.0,
+            "speaking_rate_max": 20.0
         }
     },
     "silence_filter": {
