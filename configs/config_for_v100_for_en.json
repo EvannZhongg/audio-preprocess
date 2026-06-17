@@ -94,7 +94,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 7
+            "batch_size": 8
         }
     },
     "strategy_parameters": {
@@ -183,7 +183,7 @@
         }
     },
     "silence_filter": {
-        "enable": true,
+        "enable": false,
         "min_silence_ms": 300,
         "thresholds": {
             "abnormal_silence_count_max": 1
