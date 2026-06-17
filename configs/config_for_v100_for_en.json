@@ -94,7 +94,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 7
+            "batch_size": 6
         }
     },
     "strategy_parameters": {
