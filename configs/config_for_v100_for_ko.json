@@ -48,7 +48,7 @@
         "batch_size": 256
     },
     "whisper":{
-        "model": "openai/whisper-large-v3-turbo",
+        "model": "h2oai/faster-whisper-large-v3-turbo",
         "model_dir_cache": "/root/.cache/huggingface/hub/models--h2oai--faster-whisper-large-v3-turbo/snapshots/0d50161d23807098c6b7ed53bbb70c7ce02702b9"
     },
     "diarization_provider": "pyannote",
