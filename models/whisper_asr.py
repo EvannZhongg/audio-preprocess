@@ -175,6 +175,7 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
             text = out["text"]
             if batch_size in [0, 1, None]:
                 text = text[0]
+            text = text.strip()
             segments.append(
                 {
                     "text": text,
