@@ -11,7 +11,7 @@
             "ru"
         ]
     },
-    "asr_provider": "funasr_nano",
+    "asr_provider": "funasr",
     "validation_asr_provider": "paraformer",
     "asr_validation": {
         "enable": true,
@@ -110,7 +110,7 @@
         "lower_bound_percent": 10,
         "upper_bound_percent": 90,
         "min_char_count": 2.0,
-        "inter_similarity_threshold": 0.5,
+        "inter_similarity_threshold": 0.6,
         "intra_similarity_threshold": 0.68,
         "refinement_batch_size": 256
     },

@@ -31,11 +31,13 @@
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "batch_size": 128
+        "batch_size": 256
     },
     "whisper":{
-        "model": "openai/whisper-large-v3-turbo",
-        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f"
+        "model": "Systran/faster-distil-whisper-large-v3",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
+        "compute_type": "float16",
+        "batch_size": 8
     },
     "diarization_provider": "pyannote",
     "pyannote": {
@@ -78,7 +80,7 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 7
+            "batch_size": 9
         }
     },
     "strategy_parameters": {
