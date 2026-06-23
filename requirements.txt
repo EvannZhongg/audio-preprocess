@@ -62,6 +62,7 @@ filelock
 silero-vad
 mutagen
 ray==2.48.0
+concurrent-log-handler==0.9.29
 
 # Text quality scoring
 language-tool-python>=2.7
