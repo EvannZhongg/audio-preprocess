@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional
+
+import numpy as np
+import torch
 
 import logger
 from logger import make_extra_tags
@@ -11,6 +15,7 @@ from pipeline_v2.exceptions import PipelineError
 from pipeline_v2.params import PipelineParams
 from pipeline_v2.state import PipelineState
 from pipeline_v2.steps.embedding_refinement import EmbeddingRefiner
+from pipeline_v2.steps.export import Exporter
 from pipeline_v2.steps.segment import Segmenter
 from pipeline_v2.steps.source_separation import Separator
 from pipeline_v2.steps.speaker_diarization import Diarizer
@@ -37,6 +42,7 @@ class PipelineV2:
             else None
         )
         self.segmenter: Segmenter = Segmenter(params.segmenter, self.vad_detector.vad_model)
+        self.exporter: Exporter = Exporter(params.output_folder)
         self._funasr_warmup = self._load_funasr_warmup(params)
 
     def _load_funasr_warmup(self, params: PipelineParams):
@@ -148,6 +154,17 @@ class PipelineV2:
         state.segment_list = segment_list
         return state
 
+    def export(self, state: PipelineState, chunk_index: int) -> PipelineState:
+        if state.segment_list is None:
+            raise PipelineError("export", "segment_list missing")
+        path = self.exporter.run(
+            state.segment_list, state.audio_path, chunk_index, log_tag=state.log_tag
+        )
+        if path is None:
+            raise PipelineError("export", "path is None")
+        state.export_path = path
+        return state
+
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
@@ -159,12 +176,17 @@ class PipelineV2:
         try:
             chunk_states = self.standardize(bootstrap)
             out: list[PipelineState] = []
-            for state in chunk_states:
+            for idx, state in enumerate(chunk_states):
+                t0 = time.perf_counter()
                 state = self.separate(state)
                 state = self.diarize(state)
                 state = self.vad(state)
+                vad_dur = sum(s.end - s.start for s in state.vad_list or [])
                 state = self.refine_embeddings(state)
+                refine_dur = sum(s.end - s.start for s in state.vad_list or [])
                 state = self.segment(state)
+                state = self.export(state, idx)
+                _log_chunk_stats(state, t0, vad_dur, refine_dur)
                 out.append(state)
             return out
         except PipelineError as e:
@@ -173,3 +195,37 @@ class PipelineV2:
         except Exception as e:
             logger.error(f"pipeline_failed unexpected {type(e).__name__} {e}", extra=bootstrap.log_tag)
             raise
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+
+def _log_chunk_stats(
+    state: PipelineState, t0: float, vad_dur: float, refine_dur: float
+) -> None:
+    seg_lens = [s.end - s.start for s in state.segment_list or []]
+    seg_dur = sum(seg_lens)
+    wall_ms = int((time.perf_counter() - t0) * 1000)
+    input_sec = state.duration or 0.0
+
+    def pct(x: float) -> float:
+        return (x / input_sec * 100.0) if input_sec > 0 else 0.0
+
+    throughput = input_sec / (wall_ms / 1000.0) if wall_ms > 0 else 0.0
+    if seg_lens:
+        arr = np.asarray(seg_lens)
+        seg_mean = float(arr.mean())
+        seg_p50, seg_p90, seg_p99 = (float(x) for x in np.percentile(arr, [50, 90, 99]))
+    else:
+        seg_mean = seg_p50 = seg_p90 = seg_p99 = 0.0
+
+    logger.info(
+        f"chunk_done input_sec {input_sec:.1f} wall_ms {wall_ms} "
+        f"throughput {throughput:.2f} segments {len(seg_lens)} "
+        f"retain_vad_percent {pct(vad_dur):.1f}% "
+        f"retain_refine_percent {pct(refine_dur):.1f}% "
+        f"retain_seg_percent {pct(seg_dur):.1f}% "
+        f"seg_mean_sec {seg_mean:.2f} seg_p50_sec {seg_p50:.2f} "
+        f"seg_p90_sec {seg_p90:.2f} seg_p99_sec {seg_p99:.2f}",
+        extra=state.log_tag,
+    )

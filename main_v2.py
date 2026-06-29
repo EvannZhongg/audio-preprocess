@@ -14,6 +14,7 @@ os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
 os.environ["TMPDIR"] = LARGE_TEMP_PATH
 os.environ["TEMP"] = LARGE_TEMP_PATH
 os.environ["TMP"] = LARGE_TEMP_PATH
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import sys
 import warnings

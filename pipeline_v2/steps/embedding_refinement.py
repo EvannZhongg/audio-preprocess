@@ -33,6 +33,7 @@ _MIN_SEGMENT_DURATION_S = 1.0
 _WINDOW_SIZE_S = 1.1
 _WINDOW_STEP_S = 0.4
 _MIN_WAVEFORM_S = 0.1
+_REF_BATCH_SIZE = 8
 
 
 class EmbeddingRefiner:
@@ -70,6 +71,7 @@ class EmbeddingRefiner:
             n_short = n_no_ref = n_no_window = n_dropped = 0
             default_sim = self.params.inter_similarity_threshold
 
+            cand: list[tuple[Segment, np.ndarray, list[np.ndarray]]] = []
             for seg in vad_list:
                 duration = seg.end - seg.start
                 if duration < _MIN_SEGMENT_DURATION_S:
@@ -82,8 +84,7 @@ class EmbeddingRefiner:
                 seg_wave = waveform[
                     int(seg.start * sample_rate) : int(seg.end * sample_rate)
                 ]
-                ref_emb = self._embed_single(seg_wave, sample_rate)
-                if ref_emb is None:
+                if len(seg_wave) / sample_rate < _MIN_WAVEFORM_S:
                     seg.min_similarity = default_sim
                     seg.reference_embedding = None
                     refined.append(seg)
@@ -98,15 +99,30 @@ class EmbeddingRefiner:
                     n_no_window += 1
                     continue
 
-                win_embs = self._embed_batched(windows, sample_rate)
-                consistent, min_sim = self._check_consistency(ref_emb, win_embs)
-                if not consistent:
-                    n_dropped += 1
-                    continue
+                cand.append((seg, seg_wave, windows))
 
-                seg.min_similarity = float(min_sim)
-                seg.reference_embedding = ref_emb
-                refined.append(seg)
+            if cand:
+                ref_waves = [c[1] for c in cand]
+                ref_embs = self._embed_batched(ref_waves, sample_rate, batch=_REF_BATCH_SIZE)
+
+                win_counts = [len(c[2]) for c in cand]
+                flat_windows: list[np.ndarray] = [w for c in cand for w in c[2]]
+                flat_win_embs = self._embed_batched(flat_windows, sample_rate)
+
+                offset = 0
+                for (seg, _, _), ref_emb, n_win in zip(cand, ref_embs, win_counts):
+                    win_embs = flat_win_embs[offset : offset + n_win]
+                    offset += n_win
+
+                    ref_emb_2d = ref_emb.reshape(1, -1)
+                    consistent, min_sim = self._check_consistency(ref_emb_2d, win_embs)
+                    if not consistent:
+                        n_dropped += 1
+                        continue
+
+                    seg.min_similarity = float(min_sim)
+                    seg.reference_embedding = ref_emb_2d
+                    refined.append(seg)
         except Exception:
             logger.error(f"emb_runtime_error {traceback.format_exc()}", extra=log_tag)
             return None
@@ -133,8 +149,9 @@ class EmbeddingRefiner:
         with torch.no_grad():
             return self.model(feats.unsqueeze(0)).cpu().numpy()
 
-    def _embed_batched(self, waves: list[np.ndarray], sr: int) -> np.ndarray:
-        batch = self.params.refinement_batch_size
+    def _embed_batched(self, waves: list[np.ndarray], sr: int, batch: Optional[int] = None) -> np.ndarray:
+        if batch is None:
+            batch = self.params.refinement_batch_size
         all_emb: list[np.ndarray] = []
         for i in range(0, len(waves), batch):
             chunk = waves[i : i + batch]

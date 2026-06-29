@@ -52,6 +52,9 @@ class PipelineState:
     # Step 4 (segmenter)
     segment_list: Optional[list[Segment]] = None
 
+    # Step 5 (export)
+    export_path: Optional[str] = None
+
     # Shared structured-log tag; set once at run() entry, threaded
     # into every step's logger calls.
     log_tag: dict = field(default_factory=dict)

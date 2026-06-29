@@ -26,6 +26,7 @@ class SourceSeparationParams(BaseModel):
 
 
 class DiarizationParams(BaseModel):
+    provider: Literal["pyannote"]
     huggingface_token: str
     pyannote_model: str
     pyannote_model_dir_cache: Optional[str]
@@ -118,8 +119,8 @@ class PipelineParams(BaseModel):
                 "target_sample_rate": entrypoint.get("SAMPLE_RATE", 24000),
                 "num_threads": cfg.get("threads", 4),
                 "ffmpeg_timeout": 200,
-                "max_audio_duration_seconds": 3 * 3600,
-                "max_file_size_bytes": 900 * 1024 * 1024,
+                "max_audio_duration_seconds": 10 * 3600,
+                "max_file_size_bytes": 5 * 1024 * 1024 * 1024,
                 "target_dbfs": -20.0,
                 "chunk_min_seconds": 600.0,
                 "chunk_max_seconds": 1800.0,
@@ -131,6 +132,7 @@ class PipelineParams(BaseModel):
                 "uvr_conf": separate.get("uvr", {}),
             },
             "diarization": {
+                "provider": pyannote.get("provider", "pyannote"),
                 "huggingface_token": cfg["huggingface_token"],
                 "pyannote_model": pyannote.get("model", "pyannote/speaker-diarization-3.1"),
                 "pyannote_model_dir_cache": pyannote.get("model_dir_cache"),
