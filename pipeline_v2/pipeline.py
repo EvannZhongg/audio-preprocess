@@ -157,8 +157,11 @@ class PipelineV2:
     def export(self, state: PipelineState, chunk_index: int, output_folder: str) -> PipelineState:
         if state.segment_list is None:
             raise PipelineError("export", "segment_list missing")
+        if state.waveform is None or state.sample_rate is None:
+            raise PipelineError("export", "waveform/sample_rate missing")
         path = self.exporter.run(
-            state.segment_list, state.audio_path, chunk_index, output_folder,
+            state.segment_list, state.waveform, state.sample_rate,
+            state.audio_path, chunk_index, output_folder,
             log_tag=state.log_tag,
         )
         if path is None:
