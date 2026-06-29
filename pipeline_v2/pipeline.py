@@ -42,7 +42,7 @@ class PipelineV2:
             else None
         )
         self.segmenter: Segmenter = Segmenter(params.segmenter, self.vad_detector.vad_model)
-        self.exporter: Exporter = Exporter(params.output_folder)
+        self.exporter: Exporter = Exporter()
         self._funasr_warmup = self._load_funasr_warmup(params)
 
     def _load_funasr_warmup(self, params: PipelineParams):
@@ -154,11 +154,12 @@ class PipelineV2:
         state.segment_list = segment_list
         return state
 
-    def export(self, state: PipelineState, chunk_index: int) -> PipelineState:
+    def export(self, state: PipelineState, chunk_index: int, output_folder: str) -> PipelineState:
         if state.segment_list is None:
             raise PipelineError("export", "segment_list missing")
         path = self.exporter.run(
-            state.segment_list, state.audio_path, chunk_index, log_tag=state.log_tag
+            state.segment_list, state.audio_path, chunk_index, output_folder,
+            log_tag=state.log_tag,
         )
         if path is None:
             raise PipelineError("export", "path is None")
@@ -168,7 +169,7 @@ class PipelineV2:
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
-    def run(self, audio_path: str) -> list[PipelineState]:
+    def run(self, audio_path: str, output_folder: str) -> list[PipelineState]:
         bootstrap = PipelineState(
             audio_path=audio_path,
             log_tag=make_extra_tags(audio_file=os.path.basename(audio_path)),
@@ -185,7 +186,7 @@ class PipelineV2:
                 state = self.refine_embeddings(state)
                 refine_dur = sum(s.end - s.start for s in state.vad_list or [])
                 state = self.segment(state)
-                state = self.export(state, idx)
+                state = self.export(state, idx, output_folder)
                 _log_chunk_stats(state, t0, vad_dur, refine_dur)
                 out.append(state)
             return out

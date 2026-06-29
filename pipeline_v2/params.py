@@ -80,7 +80,6 @@ class PipelineParams(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     device_name: str
-    output_folder: str
 
     standardization: StandardizationParams
     source_separation: SourceSeparationParams
@@ -114,7 +113,6 @@ class PipelineParams(BaseModel):
 
         v2 = {
             "device_name": cfg.get("device_name", "cuda:0"),
-            "output_folder": cfg.get("output_folder", "processed_data"),
             "standardization": {
                 "target_sample_rate": entrypoint.get("SAMPLE_RATE", 24000),
                 "num_threads": cfg.get("threads", 4),

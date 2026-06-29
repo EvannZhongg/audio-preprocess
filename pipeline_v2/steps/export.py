@@ -11,15 +11,12 @@ from pipeline_v2.state import Segment
 
 
 class Exporter:
-    def __init__(self, output_folder: str) -> None:
-        self.output_folder = output_folder
-        os.makedirs(output_folder, exist_ok=True)
-
     def run(
         self,
         segment_list: list[Segment],
         audio_path: str,
         chunk_index: int,
+        output_folder: str,
         log_tag: Optional[dict] = None,
     ) -> Optional[str]:
         if not segment_list:
@@ -28,6 +25,7 @@ class Exporter:
 
         t_total = time.perf_counter()
         try:
+            os.makedirs(output_folder, exist_ok=True)
             base = os.path.splitext(os.path.basename(audio_path))[0]
             file_name = f"{base}_chunk{chunk_index}"
             payload = {
@@ -36,7 +34,7 @@ class Exporter:
                 "chunk_index": chunk_index,
                 "sentences": [self._segment_to_dict(s, file_name) for s in segment_list],
             }
-            out_path = os.path.join(self.output_folder, f"{file_name}.json")
+            out_path = os.path.join(output_folder, f"{file_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception:

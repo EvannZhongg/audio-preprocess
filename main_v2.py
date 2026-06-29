@@ -38,6 +38,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
     p.add_argument("--input", required=True, help="audio file or folder")
+    p.add_argument("--output", required=True, help="output folder for exported jsons")
     p.add_argument("--num-workers", type=int, default=1)
     return p.parse_args()
 
@@ -58,11 +59,12 @@ def _init_worker(config_path: str) -> None:
     _WORKER_PIPE = PipelineV2(params)
 
 
-def _process_one(audio_path: str) -> tuple[str, int, str]:
+def _process_one(task: tuple[str, str]) -> tuple[str, int, str]:
     assert _WORKER_PIPE is not None
+    audio_path, output_folder = task
     name = os.path.basename(audio_path)
     try:
-        states = _WORKER_PIPE.run(audio_path)
+        states = _WORKER_PIPE.run(audio_path, output_folder)
         n = sum(len(s.segment_list) if s.segment_list else 0 for s in states)
         return (name, n, "")
     except Exception as e:
@@ -79,13 +81,15 @@ def main() -> None:
 
     total = len(audio_paths)
     num_workers = max(1, min(args.num_workers, total))
-    logger.info(f"main_v2 files {total} workers {num_workers}")
+    logger.info(f"main_v2 files {total} workers {num_workers} output {args.output}")
+
+    tasks = [(p, args.output) for p in audio_paths]
 
     if num_workers == 1:
         _init_worker(args.config)
         results = [
-            _process_one(p)
-            for p in tqdm.tqdm(audio_paths, desc="pipeline_v2")
+            _process_one(t)
+            for t in tqdm.tqdm(tasks, desc="pipeline_v2")
         ]
     else:
         with mp.Pool(
@@ -94,7 +98,7 @@ def main() -> None:
             initargs=(args.config,),
         ) as pool:
             results = list(tqdm.tqdm(
-                pool.imap_unordered(_process_one, audio_paths, chunksize=1),
+                pool.imap_unordered(_process_one, tasks, chunksize=1),
                 total=total,
                 desc="pipeline_v2",
             ))
