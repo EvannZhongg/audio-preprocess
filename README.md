@@ -53,7 +53,7 @@ LibriTTS、自定义 JSON 元数据。
 ## 安装依赖
 
 ```bash
-conda create -y -n AudioPipeline python=3.10
+conda create -y -n AudioPipeline python=3.10  # Docker 部署用 3.9.21
 conda activate AudioPipeline
 
 # 1. 安装 PyTorch（torch 不在 requirements.txt 中，需单独安装）
@@ -68,18 +68,23 @@ pip install -r requirements.txt
 
 主要依赖：`pyannote.audio`、`whisperx`、`funasr`、`faster-whisper`、`silero-vad`、`librosa`、`language-tool-python`、`transformers`、`ray`。
 
-### cuDNN 问题（使用 whisper / faster-whisper 时）
+### 常见问题：cuDNN 缺失
 
-如果运行时报错 `libcudnn_ops_infer.so.8: cannot open shared object file`，说明系统缺少 cuDNN 8 库。在 CUDA 12.x 机器上执行：
+**报错**：`libcudnn_ops_infer.so.8: cannot open shared object file`
+
+**原因**：系统缺少 cuDNN 8 库。
+
+**修复**：
 
 ```bash
+# 安装 cuDNN
 pip install nvidia-cudnn-cu12==8.9.7.29
 
-# 设置库路径（当前 session 生效）
+# 临时生效（当前 session）
 export LD_LIBRARY_PATH=$(python -c "import nvidia.cudnn; import os; print(os.path.dirname(nvidia.cudnn.__file__))")/lib:$LD_LIBRARY_PATH
 ```
 
-让 conda env 激活时自动生效：
+**永久生效**（每次激活 conda env 自动设置）：
 
 ```bash
 mkdir -p $CONDA_PREFIX/etc/conda/activate.d
@@ -89,7 +94,7 @@ echo 'export LD_LIBRARY_PATH=$(python -c "import nvidia.cudnn; import os; print(
 
 ## 模型文件准备
 
-模型文件放在 `audio-preprocess/ckpts/` 目录下（暂存于 `cfs/cfs-du3y2r4h/share/ckpts`，无法获取请私聊 bobbsun）。
+模型文件放在 `audio-preprocess/ckpts/` 目录下
 
 ### 核心模型
 ```
