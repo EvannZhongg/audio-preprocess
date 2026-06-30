@@ -2,6 +2,12 @@
 
 这是一个端到端的音频数据处理管线，专门用于将"野生"音频数据（podcast、有声书、Web 音频等）转换为高质量、可直接用于训练的 TTS 数据集。管线集成了降噪、说话人分离、VAD、ASR、强制对齐、文本/音频质量评分、领域标注等多个步骤，最终输出按说话人切分的干净音频片段及结构化 JSON 元数据。
 
+- **千万小时级处理能力**：基于 Ray 分布式框架，支持跨机器、多 GPU 水平扩展，可处理千万小时级音频数据集
+- **多语种支持**：中文、英文、日文、韩文、法文、德文、俄文，每种语言独立校准阈值配置
+- **灵活的运行模式**：单进程（`main.py`）、单机多 GPU（`main_multi.py`）、Ray 集群（`run_ray_task.py`）三种模式按需选择
+
+集群部署方案详见 [Ray 分布式处理](#ray-分布式处理-)。
+
 ## 主要功能
 
 ### 音频处理
@@ -47,13 +53,39 @@ LibriTTS、自定义 JSON 元数据。
 ## 安装依赖
 
 ```bash
-conda create -y -n AudioPipeline python=3.9
+conda create -y -n AudioPipeline python=3.10
 conda activate AudioPipeline
 
-bash env.sh
+# 1. 安装 PyTorch（torch 不在 requirements.txt 中，需单独安装）
+# CUDA 12.x 驱动（如 L20/L40/A100）使用 cu124：
+pip install torch==2.5.0 torchaudio==2.5.0 torchvision==0.20.0 --index-url https://download.pytorch.org/whl/cu124
+
+# 2. 安装其余依赖
+pip install -r requirements.txt
 ```
 
+> **注意**：torch 在 `requirements.txt` 中被注释掉（Dockerfile 里通过 conda 安装），本地机器需手动执行第 1 步。
+
 主要依赖：`pyannote.audio`、`whisperx`、`funasr`、`faster-whisper`、`silero-vad`、`librosa`、`language-tool-python`、`transformers`、`ray`。
+
+### cuDNN 问题（使用 whisper / faster-whisper 时）
+
+如果运行时报错 `libcudnn_ops_infer.so.8: cannot open shared object file`，说明系统缺少 cuDNN 8 库。在 CUDA 12.x 机器上执行：
+
+```bash
+pip install nvidia-cudnn-cu12==8.9.7.29
+
+# 设置库路径（当前 session 生效）
+export LD_LIBRARY_PATH=$(python -c "import nvidia.cudnn; import os; print(os.path.dirname(nvidia.cudnn.__file__))")/lib:$LD_LIBRARY_PATH
+```
+
+让 conda env 激活时自动生效：
+
+```bash
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+echo 'export LD_LIBRARY_PATH=$(python -c "import nvidia.cudnn; import os; print(os.path.dirname(nvidia.cudnn.__file__))")/lib:$LD_LIBRARY_PATH' \
+    > $CONDA_PREFIX/etc/conda/activate.d/cudnn.sh
+```
 
 ## 模型文件准备
 
@@ -92,16 +124,14 @@ ckpts/
 
 ## 配置文件
 
-按场景/语言选择：
+按场景/语言/GPU显存大小/性能选择：
 
 | 配置 | 用途 |
 |---|---|
-| `configs/config.json` | 通用模板 |
-| `configs/config_for_v100.json` | V100 通用 |
-| `configs/config_for_v100_for_{zh,en,fr,ja,ko,de,russian}.json` | 各语种独立校准 |
-| `configs/config_for_a10_for_{en,ja}.json` | A10 优化版 |
-| `configs/config_for_p40.json` | P40 兼容版 |
-| `configs/config_for_t4.json` | T4 兼容版 |
+| `configs/config_for_v100_for_{zh,en,fr,ja,ko,de,russian}.json` | V100 各语种独立校准 |
+| `configs/config_for_a10_for_{en,ja}.json` | A10 英/日语优化版 |
+| `configs/config_for_p40_for_zh.json` | P40 中文版 |
+| `configs/config_for_l20_for_zh.json` | L20 中文版 |
 
 ### 关键配置项
 
@@ -144,12 +174,16 @@ ckpts/
 
 ### 快速开始
 
-1. 准备音频文件：放在 `examples/` 等文件夹中
-2. 运行处理管线：
+1. 准备音频文件：例如放在 `ORIGINAL_DATA/` 等文件夹中
+2. 按音频语种选择对应配置，运行处理管线：
    ```bash
-   python main.py --input_folder_path examples/ --config_path configs/config_for_v100_for_zh.json
+   # 中文音频
+   python main.py --input_folder_path ORIGINAL_DATA/ximalaya/ --config_path configs/config_for_v100_for_zh.json --output_folder ./PROCESSED_DATA/ximalaya
+   # 英文音频
+   python main.py --input_folder_path ORIGINAL_DATA/spotify/ --config_path configs/config_for_v100_for_en.json --output_folder ./PROCESSED_DATA/spotify
+   # 其他语种类推，配置文件列表见「配置文件」章节
    ```
-3. 查看结果：默认输出在 `examples_processed/`
+3. 查看结果：输出目录由 `--output_folder` 指定
 
 ### 命令行参数
 
@@ -305,9 +339,66 @@ Step 7:    Export (合并干净音频 + 写 JSON)
 
 ## Ray 分布式处理 🚀
 
-- `scripts/start_ray.sh` 启动头节点和 worker 节点
-- `run_ray_task.py` 在头节点运行；输入/输出路径在 `ray_task/config.py`
-- 方案设计：https://iwiki.woa.com/p/4015720564
+面向**千万小时级**音频数据的集群化处理方案。通过 Ray 将任务分发到多台机器、多张 GPU，实现水平扩展。
+
+### 适用场景
+
+- 单机 `main_multi.py` 处理速度不够时（通常 >10 万小时）
+- 需要跨机器并行处理多个数据集
+- 数据存放在共享 CFS 上，多节点可同时读写
+
+### 架构
+
+```
+Head Node（调度）
+    └── run_ray_task.py  ←  任务分发 + 进度追踪
+Worker Node × N（计算）
+    └── 每节点若干 GPU，每 GPU 跑 MAX_WORKERS 个 pipeline 进程
+```
+
+### 第一步：配置
+
+编辑 `ray_task/config.py`：
+
+```python
+DATASET_NAME = "ximalaya_all"               # 数据集名称
+CONFIG_PATH  = "./configs/config_for_v100_for_zh.json"  # 处理配置
+
+PODCAST_PATH    = "/cfs/.../DATA"           # 输入音频根目录（CFS）
+OUTPUT_ROOT_DIR = "/cfs/.../PROCESSED_DATA" # 输出根目录（CFS）
+
+MAX_WORKERS   = 2     # 每张 GPU 并发 pipeline 数
+GPU_PER_TASK  = 0.5   # 每个 worker 占用 GPU 份额（0.5 = 2个worker共享1张卡）
+CPU_PER_TASK_GPU = 5  # 每个 worker 占用 CPU 核数
+```
+
+### 第二步：启动集群
+
+在**每台机器**上执行（自动判断是头节点还是 worker 节点）：
+
+```bash
+bash scripts/start_ray.sh auto
+```
+
+也可以手动分步：
+```bash
+# 头节点
+bash scripts/start_ray.sh start-head
+
+# 每台 worker 节点
+bash scripts/start_ray.sh start-node
+```
+
+### 第三步：提交任务
+
+在**头节点**上运行：
+
+```bash
+nohup python run_ray_task.py > run.log 2>&1 &
+tail -f run.log
+```
+
+任务进度和结果保存在 `ray_task/config.py` 中配置的 `TASK_RESULT_FILE` 和 `REPORT_PATH`。
 
 ## 数据策略原则
 
