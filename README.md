@@ -4,7 +4,7 @@
 
 - **千万小时级处理能力**：基于 Ray 分布式框架，支持跨机器、多 GPU 水平扩展，可处理千万小时级音频数据集
 - **多语种支持**：中文、英文、日文、韩文、法文、德文、俄文，每种语言独立校准阈值配置
-- **灵活的运行模式**：单进程（`main.py`）、单机多 GPU（`main_multi.py`）、Ray 集群（`run_ray_task.py`）三种模式按需选择
+- **灵活的运行模式**：单机（`main.py`，单/多进程、多 GPU 自动分配）、Ray 集群（`run_ray_task.py`）两种模式按需选择
 
 集群部署方案详见 [Ray 分布式处理](#ray-分布式处理-)。
 
@@ -47,7 +47,7 @@
 LibriTTS、自定义 JSON 元数据。
 
 ### 分布式
-- 单机：`main.py`（单进程）/ `main_multi.py`（多 GPU 并行）
+- 单机：`main.py`（单进程 / 多进程 / 多 GPU）
 - 集群：`run_ray_task.py`（Ray 分布式，需配 `ray_task/config.py`）
 
 ## 安装依赖
@@ -203,27 +203,30 @@ python main.py [OPTIONS]
 
 ## 多 GPU 并行处理
 
-```bash
-# 全部可用 GPU，每卡 2 个 worker
-python main_multi.py \
-    --input_folder_path /path/to/audio \
-    --output_folder /path/to/out \
-    --num_workers_per_gpu 2
+`main.py` 通过 `--num_workers` 启动多进程池，`init_pipeline_global` 会按 worker 编号自动把每个 worker 绑到一张 GPU 上（`worker_id % 可用GPU数`），所以无需额外命令即可跑满多卡。
 
-# 4 卡禁用 0/3，只用 1/2
-python main_multi.py \
+```bash
+# 4 卡机器，每卡跑 2 个 worker（共 8 进程）
+python main.py \
     --input_folder_path /path/to/audio \
+    --config_path configs/config_for_v100_for_zh.json \
     --output_folder /path/to/out \
-    --num_workers_per_gpu 2 \
-    --disabled_gpu_ids "0,3"
+    --num_workers 8
+
+# 只用 GPU 1、2（屏蔽 0、3），每卡 2 个 worker
+CUDA_VISIBLE_DEVICES=1,2 python main.py \
+    --input_folder_path /path/to/audio \
+    --config_path configs/config_for_v100_for_zh.json \
+    --output_folder /path/to/out \
+    --num_workers 4
 ```
 
-参数：
-- `--input_folder_path`：输入音频文件夹
-- `--manifest_path`（可选）：CSV manifest，优先于 input_folder
-- `--output_folder`：输出根目录
-- `--num_workers_per_gpu`：每卡 worker 数
-- `--disabled_gpu_ids`：禁用的 GPU ID 列表
+要点：
+- **进程数 = GPU 数 × 每卡 worker 数**：例如 4 卡 × 每卡 2 worker → `--num_workers 8`
+- **屏蔽指定 GPU**：用环境变量 `CUDA_VISIBLE_DEVICES` 控制可见 GPU（`main.py` 本身没有 `--disabled_gpu_ids` 参数）
+- **每卡 worker 数**：V100 上 batch_size 8 时建议每卡 1~2 个 worker，显存不够就降到 1
+- **CPU 线程**：`--threads` 控制每个 worker 的 torch 线程数，默认 2；总线程数 ≈ `num_workers × threads`
+- **断点续传**：`--report_path processing_report.csv`，重跑时会自动跳过已处理文件
 
 ## 输入输出
 
@@ -348,7 +351,7 @@ Step 7:    Export (合并干净音频 + 写 JSON)
 
 ### 适用场景
 
-- 单机 `main_multi.py` 处理速度不够时（通常 >10 万小时）
+- 单机 `main.py` 处理速度不够时（通常 >10 万小时）
 - 需要跨机器并行处理多个数据集
 - 数据存放在共享 CFS 上，多节点可同时读写
 
