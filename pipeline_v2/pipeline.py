@@ -169,6 +169,28 @@ class PipelineV2:
         state.export_path = path
         return state
 
+    def run_gpu_stages(self, state: PipelineState) -> tuple[PipelineState, float, float]:
+        """Run the GPU-bound stages on a pre-standardized state.
+
+        separate -> diarize -> vad -> refine_embeddings -> segment.
+
+        Export is intentionally excluded so callers can pipeline export IO
+        (mp3 encode + disk write) with the next chunk's GPU work. Must be
+        called from the thread that owns the CUDA context.
+
+        Returns (enriched_state, vad_dur_seconds, refine_dur_seconds); the
+        durations are the retained speech seconds after VAD and after
+        embedding refinement, for `log_chunk_stats`.
+        """
+        state = self.separate(state)
+        state = self.diarize(state)
+        state = self.vad(state)
+        vad_dur = sum(s.end - s.start for s in state.vad_list or [])
+        state = self.refine_embeddings(state)
+        refine_dur = sum(s.end - s.start for s in state.vad_list or [])
+        state = self.segment(state)
+        return state, vad_dur, refine_dur
+
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
@@ -182,15 +204,9 @@ class PipelineV2:
             out: list[PipelineState] = []
             for idx, state in enumerate(chunk_states):
                 t0 = time.perf_counter()
-                state = self.separate(state)
-                state = self.diarize(state)
-                state = self.vad(state)
-                vad_dur = sum(s.end - s.start for s in state.vad_list or [])
-                state = self.refine_embeddings(state)
-                refine_dur = sum(s.end - s.start for s in state.vad_list or [])
-                state = self.segment(state)
+                state, vad_dur, refine_dur = self.run_gpu_stages(state)
                 state = self.export(state, idx, output_folder)
-                _log_chunk_stats(state, t0, vad_dur, refine_dur)
+                self.log_chunk_stats(state, t0, vad_dur, refine_dur)
                 out.append(state)
             return out
         except PipelineError as e:
@@ -203,33 +219,35 @@ class PipelineV2:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+    @staticmethod
+    def log_chunk_stats(
+        state: PipelineState, t0: float, vad_dur: float, refine_dur: float
+    ) -> None:
+        """Emit the per-chunk throughput / retention log line. Callable by
+        streaming callers that run GPU stages and export separately."""
+        seg_lens = [s.end - s.start for s in state.segment_list or []]
+        seg_dur = sum(seg_lens)
+        wall_ms = int((time.perf_counter() - t0) * 1000)
+        input_sec = state.duration or 0.0
 
-def _log_chunk_stats(
-    state: PipelineState, t0: float, vad_dur: float, refine_dur: float
-) -> None:
-    seg_lens = [s.end - s.start for s in state.segment_list or []]
-    seg_dur = sum(seg_lens)
-    wall_ms = int((time.perf_counter() - t0) * 1000)
-    input_sec = state.duration or 0.0
+        def pct(x: float) -> float:
+            return (x / input_sec * 100.0) if input_sec > 0 else 0.0
 
-    def pct(x: float) -> float:
-        return (x / input_sec * 100.0) if input_sec > 0 else 0.0
+        throughput = input_sec / (wall_ms / 1000.0) if wall_ms > 0 else 0.0
+        if seg_lens:
+            arr = np.asarray(seg_lens)
+            seg_mean = float(arr.mean())
+            seg_p50, seg_p90, seg_p99 = (float(x) for x in np.percentile(arr, [50, 90, 99]))
+        else:
+            seg_mean = seg_p50 = seg_p90 = seg_p99 = 0.0
 
-    throughput = input_sec / (wall_ms / 1000.0) if wall_ms > 0 else 0.0
-    if seg_lens:
-        arr = np.asarray(seg_lens)
-        seg_mean = float(arr.mean())
-        seg_p50, seg_p90, seg_p99 = (float(x) for x in np.percentile(arr, [50, 90, 99]))
-    else:
-        seg_mean = seg_p50 = seg_p90 = seg_p99 = 0.0
-
-    logger.info(
-        f"chunk_done input_sec {input_sec:.1f} wall_ms {wall_ms} "
-        f"throughput {throughput:.2f} segments {len(seg_lens)} "
-        f"retain_vad_percent {pct(vad_dur):.1f}% "
-        f"retain_refine_percent {pct(refine_dur):.1f}% "
-        f"retain_seg_percent {pct(seg_dur):.1f}% "
-        f"seg_mean_sec {seg_mean:.2f} seg_p50_sec {seg_p50:.2f} "
-        f"seg_p90_sec {seg_p90:.2f} seg_p99_sec {seg_p99:.2f}",
-        extra=state.log_tag,
-    )
+        logger.info(
+            f"chunk_done input_sec {input_sec:.1f} wall_ms {wall_ms} "
+            f"throughput {throughput:.2f} segments {len(seg_lens)} "
+            f"retain_vad_percent {pct(vad_dur):.1f}% "
+            f"retain_refine_percent {pct(refine_dur):.1f}% "
+            f"retain_seg_percent {pct(seg_dur):.1f}% "
+            f"seg_mean_sec {seg_mean:.2f} seg_p50_sec {seg_p50:.2f} "
+            f"seg_p90_sec {seg_p90:.2f} seg_p99_sec {seg_p99:.2f}",
+            extra=state.log_tag,
+        )
