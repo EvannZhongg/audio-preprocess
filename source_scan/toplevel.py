@@ -10,16 +10,19 @@ from __future__ import annotations
 import os
 from typing import Iterator
 
+from tqdm import tqdm
+
 
 def top_entries(root: str) -> Iterator[dict]:
     """Yield {name, is_dir} for each first-level entry under root (no recursion).
-    Hidden and .temp entries are skipped, matching DirectoryScanner."""
+    Hidden and .temp entries are skipped, matching DirectoryScanner. Progress is
+    reported with a tqdm counter (no total -- the level is streamed)."""
     try:
         it = os.scandir(root)
     except OSError:
         return
     with it:
-        for entry in it:
+        for entry in tqdm(it, desc="scan_top entries", unit="entry"):
             name = entry.name
             if name.startswith(".") or ".temp" in name:
                 continue
