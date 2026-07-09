@@ -20,8 +20,7 @@ import pyarrow.parquet as pq
 # ---- schemas -------------------------------------------------------------
 
 TOP_SCHEMA = pa.schema([
-    ("name", pa.string()),          # first-level entry name, relative to root
-    ("is_dir", pa.bool_()),         # True: recurse into it in stage 2; False: a file
+    ("name", pa.string()),          # first-level entry name, relative to root (no type -- see stage 1)
 ])
 
 PATHS_SCHEMA = pa.schema([
@@ -93,14 +92,15 @@ def _write_sharded(record_iter, out_dir: str, prefix: str, schema: pa.Schema,
 
 # ---- stage 0: top-level entries ------------------------------------------
 
-def write_top(entry_iter, out_dir: str, shard_size: int = 100_000) -> int:
-    """Write first-level entries ({name, is_dir}) into top_part-NNNNN.parquet."""
-    return _write_sharded(entry_iter, out_dir, "top", TOP_SCHEMA, shard_size)
+def write_top(name_iter, out_dir: str, shard_size: int = 100_000) -> int:
+    """Write first-level entry names into top_part-NNNNN.parquet shards."""
+    records = ({"name": name} for name in name_iter)
+    return _write_sharded(records, out_dir, "top", TOP_SCHEMA, shard_size)
 
 
-def read_top(top_parquet: str) -> list[dict]:
-    """Load one stage-0 shard's entries as dicts ({name, is_dir})."""
-    return pq.read_table(top_parquet, columns=["name", "is_dir"]).to_pylist()
+def read_top(top_parquet: str) -> list[str]:
+    """Load one stage-0 shard's first-level names."""
+    return pq.read_table(top_parquet, columns=["name"])["name"].to_pylist()
 
 
 # ---- stage 1: paths file -------------------------------------------------

@@ -14,7 +14,7 @@ import os
 import sys
 
 from source_scan.manifest import write_top
-from source_scan.toplevel import top_entries
+from source_scan.toplevel import top_names
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,7 +35,7 @@ def _assert_out_outside_root(audio_root: str, out: str) -> None:
 def main() -> None:
     args = parse_args()
     _assert_out_outside_root(args.audio_root, args.out)
-    n = write_top(top_entries(args.audio_root), args.out, shard_size=args.shard_size)
+    n = write_top(top_names(args.audio_root), args.out, shard_size=args.shard_size)
     print(f"scan_top done: {n} top-level entries -> {args.out}", file=sys.stderr)
 
 
