@@ -41,10 +41,19 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--ray-config", default="configs/pipeline_v2_ray.yaml", help="ray hardware map")
-    p.add_argument("--input", required=True, help="audio file or folder")
+    # Input is either an ad-hoc file/folder (--input) or a prebuilt manifest
+    # (--manifest, whose relative_paths are resolved under --root).
+    p.add_argument("--input", help="audio file or folder")
+    p.add_argument("--manifest", help="manifest parquet (file or shard dir) from build_manifest.py")
+    p.add_argument("--root", help="dataset root to resolve manifest relative_paths against")
     p.add_argument("--output", required=True, help="output folder for exported jsons")
     p.add_argument("--address", default="auto", help="ray cluster address")
-    return p.parse_args()
+    args = p.parse_args()
+    if bool(args.input) == bool(args.manifest):
+        p.error("provide exactly one of --input or --manifest")
+    if args.manifest and not args.root:
+        p.error("--manifest requires --root to resolve relative paths")
+    return args
 
 
 def collect_audio_paths(input_path: str) -> list[str]:
@@ -57,10 +66,22 @@ def collect_audio_paths(input_path: str) -> list[str]:
     sys.exit(1)
 
 
+def collect_manifest_paths(manifest: str, root: str) -> list[str]:
+    """Resolve a manifest's relative_paths against the current root. Kept out
+    of module import time so source_scan/pyarrow only load in this mode."""
+    from source_scan.manifest import read_manifest
+
+    rels = read_manifest(manifest, columns=["relative_path"])["relative_path"].to_pylist()
+    return [os.path.join(root, rel) for rel in rels]
+
+
 def main() -> None:
     args = parse_args()
 
-    audio_paths = collect_audio_paths(args.input)
+    if args.manifest:
+        audio_paths = collect_manifest_paths(args.manifest, args.root)
+    else:
+        audio_paths = collect_audio_paths(args.input)
     if not audio_paths:
         logger.warning("no audio files to process")
         sys.exit(0)
