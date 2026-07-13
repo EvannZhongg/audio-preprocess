@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--paths", required=True, help="stage-1 paths shard directory")
     p.add_argument("--audio-root", required=True, help="audio root the paths are relative to")
     p.add_argument("--out", required=True, help="output directory for manifest shards")
-    p.add_argument("--workers", type=int, default=1, help="concurrent probe threads")
+    p.add_argument("--workers", type=int, default=32, help="concurrent probe threads")
     return p.parse_args()
 
 
