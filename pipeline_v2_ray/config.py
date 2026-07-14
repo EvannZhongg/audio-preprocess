@@ -32,7 +32,6 @@ GPU_FRACTION_PER_ACTOR = 0.01
 
 @dataclass(frozen=True)
 class Defaults:
-    cpu_per_actor: int
     max_files_per_actor: int
     max_age_seconds: int
     max_concurrency: int   # concurrent files per actor; also the actor's Ray max_concurrency
@@ -99,7 +98,6 @@ def load_ray_config(path: str) -> RayConfig:
 
     d = raw["defaults"]
     defaults = Defaults(
-        cpu_per_actor=int(d["cpu_per_actor"]),
         max_files_per_actor=int(d["max_files_per_actor"]),
         max_age_seconds=int(d["max_age_seconds"]),
         max_concurrency=int(d["max_concurrency"]),

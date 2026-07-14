@@ -85,7 +85,11 @@ class ClusterDriver:
 
     def _spawn_actor(self) -> _Actor:
         handle = GpuPipelineActor.options(
-            num_cpus=self._config.defaults.cpu_per_actor,
+            # num_cpus=0: CPU is not a scheduling gate here -- pipe_slot alone
+            # caps actors per machine. (num_gpus=0.01 stays: it's not throttling
+            # either, it's what makes Ray set CUDA_VISIBLE_DEVICES so the actor's
+            # card shows up as cuda:0 / gets its own GPU on multi-card nodes.)
+            num_cpus=0,
             num_gpus=GPU_FRACTION_PER_ACTOR,
             resources={PIPE_SLOT_RESOURCE: 1},
             max_concurrency=self._config.defaults.max_concurrency,

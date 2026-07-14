@@ -28,7 +28,6 @@
 # capacity beyond what one actor's max_concurrency can fill.
 
 defaults:
-  cpu_per_actor: 5
   max_files_per_actor: 10000      # recycle actor after N files (memory safety valve)
   max_age_seconds: 36000         # or after M seconds alive, whichever comes first
   max_concurrency: 3            # files in flight per actor (Ray max_concurrency); decode+export
