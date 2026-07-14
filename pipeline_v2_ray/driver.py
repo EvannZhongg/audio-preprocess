@@ -24,8 +24,8 @@ reconcile simply stops replacing them.
 """
 from __future__ import annotations
 
+import os
 import time
-import traceback
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -37,9 +37,19 @@ from pipeline_v2_ray.actor import GpuPipelineActor
 from pipeline_v2_ray.config import (GPU_FRACTION_PER_ACTOR, PIPE_SLOT_RESOURCE,
                                     RayConfig)
 from pipeline_v2_ray.result import FileResult
+from pipeline_v2_ray.segments import (SEG_SHARD_SIZE, error_record,
+                                       resume_state, write_segments_shard)
 
 RECONCILE_INTERVAL = 60.0   # seconds between cluster-size reconciliations
 WAIT_TIMEOUT = 5.0          # ray.wait poll timeout; also bounds reconcile latency
+
+
+@dataclass
+class FileItem:
+    """One file to process. shard_name lives on the batch (run_batch arg), not
+    per file, since a batch is exactly one manifest shard."""
+    audio_path: str      # full filesystem path to decode
+    relative_path: str   # path relative to audio root; export id hash + join key
 
 
 @dataclass
@@ -60,6 +70,10 @@ class _Actor:
 class ClusterDriver:
     def __init__(self, ray_config: RayConfig) -> None:
         self._config = ray_config
+        # Actor pool persists across batches (start -> run_batch* -> shutdown),
+        # so models are loaded once, not per manifest shard.
+        self._actors: list[_Actor] = []
+        self._last_reconcile: float = 0.0
 
     # ------------------------------------------------------------------
     # actor pool
@@ -84,102 +98,114 @@ class ClusterDriver:
     def _retire(self, actor: _Actor) -> None:
         ray.kill(actor.handle, no_restart=True)
 
+    def _alive(self) -> list[_Actor]:
+        """Actors still accepting work (not draining)."""
+        return [a for a in self._actors if not a.draining]
+
+    def _drop(self, actor: _Actor) -> None:
+        if actor in self._actors:
+            self._actors.remove(actor)
+
+    def _reconcile(self) -> None:
+        """Grow or shrink the accepting-actor count toward the cluster's current
+        pipe_slot total. Shrink is graceful: surplus actors drain. Operates on
+        the persistent pool, so it works both at start() and mid-batch."""
+        target = self._cluster_slots()
+        accepting = self._alive()
+        if target > len(accepting):
+            for _ in range(target - len(accepting)):
+                self._actors.append(self._spawn_actor())
+            logger.info(f"ray_reconcile grow to {target} (was {len(accepting)})")
+        elif target < len(accepting):
+            # Drain the youngest first (least work invested), keeping veterans.
+            for actor in sorted(accepting, key=lambda a: a.born_at, reverse=True)[
+                : len(accepting) - target
+            ]:
+                actor.draining = True
+            logger.info(f"ray_reconcile shrink to {target} (was {len(accepting)})")
+
     # ------------------------------------------------------------------
-    # main loop
+    # lifecycle: start -> run_batch* -> shutdown
     # ------------------------------------------------------------------
-    def run(self, audio_paths: list[str], output_folder: str) -> list[FileResult]:
-        """Public entrypoint. Wraps the dispatch loop so that any unexpected
-        error (cluster comms failure, actor submission race, etc.) still logs,
-        kills every live actor, and returns whatever results completed rather
-        than losing them and leaking actors."""
-        results: list[FileResult] = []
-        actors: list[_Actor] = []
-        try:
-            self._run(audio_paths, output_folder, results, actors)
-        except Exception:  # noqa: BLE001
-            logger.error(f"ray_driver_aborted {traceback.format_exc()}")
-        finally:
-            for actor in actors:
-                try:
-                    self._retire(actor)
-                except Exception:  # noqa: BLE001
-                    pass
-        n_ok = sum(1 for r in results if r.success)
-        logger.info(
-            f"ray_driver_done files {len(results)} success {n_ok} "
-            f"failed {len(results) - n_ok}"
-        )
-        return results
-
-    def _run(
-        self,
-        audio_paths: list[str],
-        output_folder: str,
-        results: list[FileResult],
-        actors: list[_Actor],
-    ) -> None:
-        concurrency = max(1, self._config.defaults.max_concurrency)
-        max_files = self._config.defaults.max_files_per_actor
-        max_age = self._config.defaults.max_age_seconds
-
-        pending: deque[str] = deque(audio_paths)
-        ref_owner: dict[ray.ObjectRef, _Actor] = {}
-        logger.info(
-            f"ray_driver_start files {len(audio_paths)} concurrency {concurrency} "
-            f"reconcile_interval {RECONCILE_INTERVAL}s output {output_folder}"
-        )
-
-        def alive() -> list[_Actor]:
-            """Actors still accepting work (not draining)."""
-            return [a for a in actors if not a.draining]
-
-        def fill() -> None:
-            """Top every accepting actor up to `concurrency` in-flight files."""
-            for actor in alive():
-                while len(actor.inflight) < concurrency and pending:
-                    path = pending.popleft()
-                    ref = actor.handle.process_file.remote(path, output_folder)
-                    actor.inflight[ref] = path
-                    actor.files_submitted += 1
-                    ref_owner[ref] = actor
-
-        def reconcile() -> None:
-            """Grow or shrink the accepting-actor count toward the cluster's
-            current pipe_slot total. Shrink is graceful: surplus actors drain."""
-            target = self._cluster_slots()
-            accepting = alive()
-            if target > len(accepting):
-                for _ in range(target - len(accepting)):
-                    actors.append(self._spawn_actor())
-                logger.info(f"ray_reconcile grow to {target} (was {len(accepting)})")
-            elif target < len(accepting):
-                # Drain the youngest first (least work invested), keeping veterans.
-                for actor in sorted(accepting, key=lambda a: a.born_at, reverse=True)[
-                    : len(accepting) - target
-                ]:
-                    actor.draining = True
-                logger.info(f"ray_reconcile shrink to {target} (was {len(accepting)})")
-
-        def drop(actor: _Actor) -> None:
-            if actor in actors:
-                actors.remove(actor)
-
-        # Initial pool from the current cluster size, then dispatch.
+    def start(self) -> None:
+        """Build the initial actor pool from the current cluster size. Call once
+        before run_batch; the pool then persists across batches."""
         if self._cluster_slots() == 0:
             raise RuntimeError(
                 f"no '{PIPE_SLOT_RESOURCE}' resources in the cluster at startup; each "
                 f"worker must declare it, e.g. ray start --resources='{{\"{PIPE_SLOT_RESOURCE}\": N}}'"
             )
-        reconcile()
+        self._reconcile()
+        self._last_reconcile = time.time()
+
+    def shutdown(self) -> None:
+        """Retire every actor. Call once after all batches (or in a finally on
+        abort). Idempotent."""
+        for actor in self._actors:
+            try:
+                self._retire(actor)
+            except Exception:  # noqa: BLE001
+                pass
+        self._actors.clear()
+
+    def run_batch(self, shard_name: str, items: list[FileItem], output_folder: str) -> list[FileResult]:
+        """Dispatch one manifest shard's files and fully drain them before
+        returning, so the shard's output is complete at a clean boundary. Uses
+        the persistent pool (reconciling elastically as it goes). Segment records
+        are buffered and written to <output>/<shard>/segments_part-NNNNN.parquet
+        every SEG_SHARD_SIZE rows, with the remainder flushed when the shard
+        finishes. Returns this shard's per-file results."""
+        concurrency = max(1, self._config.defaults.max_concurrency)
+        max_files = self._config.defaults.max_files_per_actor
+        max_age = self._config.defaults.max_age_seconds
+
+        # Everything in this batch is one manifest shard -> one output dir.
+        shard_out = os.path.join(output_folder, shard_name)
+        # Resume: skip files already recorded in this shard's segments_part
+        # parquets, and continue part numbering after them (don't overwrite).
+        done, seg_part = resume_state(shard_out)
+        if done:
+            items = [it for it in items if it.relative_path not in done]
+            logger.info(
+                f"ray_shard_resume shard {shard_name} skip {len(done)} done, "
+                f"resume at part {seg_part}, remaining {len(items)}"
+            )
+        results: list[FileResult] = []
+        pending: deque[FileItem] = deque(items)
+        ref_owner: dict[ray.ObjectRef, _Actor] = {}
+        seg_buffer: list = []
+
+        def flush() -> None:
+            nonlocal seg_part
+            if not seg_buffer:
+                return
+            write_segments_shard(seg_buffer, shard_out, seg_part)
+            logger.info(f"ray_segments_flush shard {shard_name} part {seg_part} rows {len(seg_buffer)}")
+            seg_part += 1
+            seg_buffer.clear()
+
+        def fill() -> None:
+            """Top every accepting actor up to `concurrency` in-flight files."""
+            for actor in self._alive():
+                while len(actor.inflight) < concurrency and pending:
+                    item = pending.popleft()
+                    # export adds audios/jsons + hash-bucket levels beneath shard_out.
+                    ref = actor.handle.process_file.remote(
+                        item.audio_path, shard_out, item.relative_path
+                    )
+                    actor.inflight[ref] = item
+                    actor.files_submitted += 1
+                    ref_owner[ref] = actor
+
+        logger.info(f"ray_shard_start shard {shard_name} files {len(pending)}")
         fill()
-        last_reconcile = time.time()
 
         while pending or ref_owner:
             # Periodic elasticity check (also runs when idle-waiting for slots).
-            if time.time() - last_reconcile >= RECONCILE_INTERVAL:
-                reconcile()
+            if time.time() - self._last_reconcile >= RECONCILE_INTERVAL:
+                self._reconcile()
                 fill()
-                last_reconcile = time.time()
+                self._last_reconcile = time.time()
 
             if not ref_owner:
                 # No work in flight but files remain -> cluster has no slots
@@ -193,33 +219,44 @@ class ClusterDriver:
                 continue
             ref = ready[0]
             actor = ref_owner.pop(ref)
-            path = actor.inflight.pop(ref)
+            item = actor.inflight.pop(ref)
+            path = item.audio_path
 
             try:
-                results.append(self._log_result(FileResult.from_dict(ray.get(ref))))
+                fr = FileResult.from_dict(ray.get(ref))
             except RayActorError as e:
-                # The actor/machine itself died (crash, OOM, reclaimed). It
-                # takes all its in-flight files down. We do NOT retry them (a
-                # poison file would just crash the replacement too); mark them
-                # failed. Replacement is left to reconcile, which respects the
-                # (possibly shrunk) slot total.
+                # The actor/machine itself died (crash, OOM, reclaimed). It takes
+                # all its in-flight files down. We do NOT retry them (a poison
+                # file would just crash the replacement too); mark them failed.
+                # Replacement is left to reconcile.
                 logger.error(f"ray_actor_crash file {path} err {e}")
                 results.append(FileResult(path, success=False, error=f"actor crashed: {e}"))
-                for lost_ref, lost_path in actor.inflight.items():
-                    results.append(FileResult(lost_path, success=False, error="actor crashed"))
+                seg_buffer.append(error_record(item.relative_path, f"actor crashed: {e}"))
+                for lost_ref, lost_item in actor.inflight.items():
+                    results.append(FileResult(lost_item.audio_path, success=False, error="actor crashed"))
+                    seg_buffer.append(error_record(lost_item.relative_path, "actor crashed"))
                     ref_owner.pop(lost_ref, None)
                 actor.inflight.clear()
-                drop(actor)
+                self._drop(actor)
                 continue
             except Exception as e:  # noqa: BLE001
-                # This one task errored (unexpected exception escaping the
-                # actor method, or a malformed result) but the actor is still
-                # alive. Fail just this file; keep the actor and its other
-                # in-flight work.
+                # This one task errored but the actor is still alive. Fail just
+                # this file; keep the actor and its other in-flight work.
                 logger.error(f"ray_task_error file {path} err {type(e).__name__}: {e}")
                 results.append(FileResult(path, success=False, error=f"task error: {e}"))
+                seg_buffer.append(error_record(item.relative_path, f"task error: {e}"))
                 fill()
                 continue
+
+            results.append(self._log_result(fr))
+            # Success -> its segment rows; failure -> one placeholder error row
+            # (so the failure is recorded and resume won't retry it forever).
+            if fr.success:
+                seg_buffer.extend(fr.segments)
+            else:
+                seg_buffer.append(error_record(item.relative_path, fr.error))
+            if len(seg_buffer) >= SEG_SHARD_SIZE:
+                flush()
 
             if not actor.draining and actor.needs_recycle(max_files, max_age):
                 logger.info(
@@ -231,13 +268,19 @@ class ClusterDriver:
             # A draining actor (recycled or shrunk) with no work left retires.
             if actor.draining and not actor.inflight:
                 self._retire(actor)
-                drop(actor)
+                self._drop(actor)
 
             fill()
 
-        # Normal completion: `run`'s finally retires all actors and logs the
-        # summary. Leaving actors in place here lets that single path own both
-        # normal and aborted cleanup.
+        # Shard fully drained -> flush its trailing (< SEG_SHARD_SIZE) segments,
+        # then retire any actors left draining with no work (avoid zombies
+        # lingering across batches).
+        flush()
+        for actor in [a for a in self._actors if a.draining and not a.inflight]:
+            self._retire(actor)
+            self._drop(actor)
+        logger.info(f"ray_shard_done shard {shard_name} files {len(results)}")
+        return results
 
     @staticmethod
     def _log_result(r: FileResult) -> FileResult:

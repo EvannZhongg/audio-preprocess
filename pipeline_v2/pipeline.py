@@ -86,7 +86,11 @@ class PipelineV2:
         for idx, r in enumerate(results):
             tag = make_extra_tags(audio_file=state.log_tag.get("audio_file", ""))
             tag["audio_file"] = f"{tag['audio_file']}#chunk{idx}"
-            s = PipelineState(audio_path=state.audio_path, log_tag=tag)
+            s = PipelineState(
+                audio_path=state.audio_path,
+                relative_path=state.relative_path,
+                log_tag=tag,
+            )
             s.waveform = r.waveform
             s.sample_rate = r.sample_rate
             s.duration = r.duration
@@ -159,14 +163,14 @@ class PipelineV2:
             raise PipelineError("export", "segment_list missing")
         if state.waveform is None or state.sample_rate is None:
             raise PipelineError("export", "waveform/sample_rate missing")
-        path = self.exporter.run(
+        records = self.exporter.run(
             state.segment_list, state.waveform, state.sample_rate,
-            state.audio_path, chunk_index, output_folder,
+            state.relative_path, chunk_index, output_folder,
             log_tag=state.log_tag,
         )
-        if path is None:
-            raise PipelineError("export", "path is None")
-        state.export_path = path
+        if records is None:
+            raise PipelineError("export", "export failed")
+        state.export_records = records
         return state
 
     def run_gpu_stages(self, state: PipelineState) -> tuple[PipelineState, float, float]:
@@ -194,9 +198,14 @@ class PipelineV2:
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
-    def run(self, audio_path: str, output_folder: str) -> list[PipelineState]:
+    def run(self, audio_path: str, output_folder: str,
+            relative_path: Optional[str] = None) -> list[PipelineState]:
+        # Non-ray convenience entrypoint. relative_path is the export id/join key
+        # (the ray path supplies the manifest-relative one); with no manifest
+        # here it falls back to the full audio_path so the id is never empty.
         bootstrap = PipelineState(
             audio_path=audio_path,
+            relative_path=relative_path if relative_path is not None else audio_path,
             log_tag=make_extra_tags(audio_file=os.path.basename(audio_path)),
         )
         try:

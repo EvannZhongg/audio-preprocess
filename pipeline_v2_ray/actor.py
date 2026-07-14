@@ -73,30 +73,31 @@ class GpuPipelineActor:
             f"ray_actor_ready gpu {self._gpu_name} profile {self._profile_name}"
         )
 
-    def process_file(self, audio_path: str, output_folder: str) -> dict:
+    def process_file(self, audio_path: str, output_folder: str, relative_path: str) -> dict:
         """Process one file; returns a serializable FileResult dict. Runs on a
         Ray worker thread (max_concurrency>1), overlapping its decode/export
         with other files' GPU work. Never raises: any error (including edge
         cases outside the inner per-stage handlers) becomes a failed result, so
         the driver never sees this as an actor-level crash."""
         try:
-            return self._process_file_inner(audio_path, output_folder)
+            return self._process_file_inner(audio_path, output_folder, relative_path)
         except Exception as e:  # noqa: BLE001 - last-resort guard; keep the actor alive
             logger.error(f"ray_process_file_error file {audio_path} err {type(e).__name__}: {e}")
             return FileResult(
                 audio_path, success=False, error=f"{type(e).__name__}: {e}"
             ).to_dict()
 
-    def _process_file_inner(self, audio_path: str, output_folder: str) -> dict:
+    def _process_file_inner(self, audio_path: str, output_folder: str, relative_path: str) -> dict:
         log_tag = make_extra_tags(audio_file=os.path.basename(audio_path))
         # A decode failure means the whole file is unusable -> let the outer
         # guard in process_file turn it into a failed result.
         chunk_states = self._pipeline.standardize(
-            PipelineState(audio_path=audio_path, log_tag=log_tag)
+            PipelineState(audio_path=audio_path, relative_path=relative_path, log_tag=log_tag)
         )
 
         n_segments = 0
         failed_chunks = 0
+        records: list = []
         for idx, state in enumerate(chunk_states):
             t0 = time.perf_counter()
             try:
@@ -106,6 +107,7 @@ class GpuPipelineActor:
                     torch.cuda.synchronize()
                 self._pipeline.export(state, idx, output_folder)
                 n_segments += len(state.segment_list or [])
+                records.extend(state.export_records or [])
                 PipelineV2.log_chunk_stats(state, t0, vad_dur, refine_dur)
             except Exception as e:  # noqa: BLE001 - one bad chunk must not sink the rest
                 failed_chunks += 1
@@ -113,4 +115,12 @@ class GpuPipelineActor:
 
         success = failed_chunks == 0 and len(chunk_states) > 0
         error = "" if success else f"{failed_chunks}/{len(chunk_states)} chunks failed"
-        return FileResult(audio_path, success=success, n_segments=n_segments, error=error).to_dict()
+        # Any chunk failure fails the whole file: drop even the successful
+        # chunks' segments so the segment table holds only fully-good files. The
+        # file has no recorded segments -> resume reprocesses it on rerun; any
+        # partial wav/json already on disk are harmless orphans, overwritten on
+        # the deterministic-id rerun. Failures are surfaced via logs, not a table.
+        return FileResult(
+            audio_path, success=success, n_segments=n_segments,
+            error=error, segments=records if success else [],
+        ).to_dict()

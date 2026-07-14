@@ -32,7 +32,7 @@ import ray
 
 import logger
 from pipeline_v2_ray.config import load_ray_config
-from pipeline_v2_ray.driver import ClusterDriver
+from pipeline_v2_ray.driver import ClusterDriver, FileItem
 from utils.tool import get_audio_files
 
 warnings.filterwarnings("ignore")
@@ -56,43 +56,73 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def collect_audio_paths(input_path: str) -> list[str]:
+def collect_audio_paths(input_path: str) -> list[tuple[str, list[FileItem]]]:
+    """Ad-hoc file/folder mode. One "input" batch (no manifest shards);
+    relative_path is relative to the input dir (or the basename for a single
+    file) so the export id is stable."""
     p = Path(input_path)
     if p.is_file():
-        return [str(p)]
+        return [("input", [FileItem(audio_path=str(p), relative_path=p.name)])]
     if p.is_dir():
-        return get_audio_files(str(p))
+        items = [
+            FileItem(audio_path=fp, relative_path=os.path.relpath(fp, input_path))
+            for fp in get_audio_files(str(p))
+        ]
+        return [("input", items)]
     print(f"input not found: {input_path}", file=sys.stderr)
     sys.exit(1)
 
 
-def collect_manifest_paths(manifest: str, audio_root: str) -> list[str]:
-    """Resolve a manifest's relative_paths against the audio root. Kept out of
-    module import time so source_scan/pyarrow only load in this mode."""
-    from source_scan.manifest import read_manifest
+def collect_manifest_paths(manifest: str, audio_root: str) -> list[tuple[str, list[FileItem]]]:
+    """Resolve a manifest against the audio root, grouped by shard: returns
+    [(shard_name, [FileItem, ...]), ...] in shard order. One group per
+    manifest_part-*.parquet so the driver processes shards one at a time. Kept
+    out of module import time so source_scan/pyarrow only load in this mode."""
+    from source_scan.manifest import list_shards, read_manifest
 
-    rels = read_manifest(manifest, columns=["relative_path"])["relative_path"].to_pylist()
-    return [os.path.join(audio_root, rel) for rel in rels]
+    shards = list_shards(manifest, "manifest") if os.path.isdir(manifest) else [manifest]
+    groups: list[tuple[str, list[FileItem]]] = []
+    for shard in shards:
+        shard_name = os.path.splitext(os.path.basename(shard))[0]  # e.g. manifest_part-00000
+        rels = read_manifest(shard, columns=["relative_path"])["relative_path"].to_pylist()
+        items = [
+            FileItem(audio_path=os.path.join(audio_root, rel), relative_path=rel)
+            for rel in rels
+        ]
+        if items:
+            groups.append((shard_name, items))
+    return groups
 
 
 def main() -> None:
     args = parse_args()
 
     if args.manifest:
-        audio_paths = collect_manifest_paths(args.manifest, args.audio_root)
+        groups = collect_manifest_paths(args.manifest, args.audio_root)
     else:
-        audio_paths = collect_audio_paths(args.input)
-    if not audio_paths:
+        groups = collect_audio_paths(args.input)
+    if not groups:
         logger.warning("no audio files to process")
         sys.exit(0)
 
     ray.init(address=args.address, ignore_reinit_error=True)
+    driver = ClusterDriver(load_ray_config(args.ray_config))
+    results = []
     try:
-        ray_config = load_ray_config(args.ray_config)
-        driver = ClusterDriver(ray_config)
-        driver.run(audio_paths, args.output)
+        driver.start()
+        # Process manifest shards strictly in order: each shard is fully drained
+        # (and its segments flushed) before the next begins.
+        for shard_name, items in groups:
+            results.extend(driver.run_batch(shard_name, items, args.output))
     finally:
+        driver.shutdown()
         ray.shutdown()
+
+    n_ok = sum(1 for r in results if r.success)
+    logger.info(
+        f"ray_driver_done files {len(results)} success {n_ok} "
+        f"failed {len(results) - n_ok}"
+    )
 
 
 if __name__ == "__main__":
