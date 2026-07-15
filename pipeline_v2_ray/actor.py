@@ -26,7 +26,7 @@ import torch
 import logger
 from logger import make_extra_tags
 from pipeline_v2.pipeline import PipelineV2
-from pipeline_v2.state import PipelineState
+from pipeline_v2.state import PIPELINE_VERSION, PipelineState
 from pipeline_v2_ray.config import RayConfig
 from pipeline_v2_ray.result import FileResult
 
@@ -88,7 +88,7 @@ class GpuPipelineActor:
             ).to_dict()
 
     def _process_file_inner(self, audio_path: str, output_folder: str, relative_path: str) -> dict:
-        log_tag = make_extra_tags(audio_file=os.path.basename(audio_path))
+        log_tag = make_extra_tags(audio_file=relative_path, version=PIPELINE_VERSION)
         # A decode failure means the whole file is unusable -> let the outer
         # guard in process_file turn it into a failed result.
         chunk_states = self._pipeline.standardize(

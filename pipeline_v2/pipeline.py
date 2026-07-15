@@ -13,7 +13,7 @@ from logger import make_extra_tags
 from models import funasr_asr
 from pipeline_v2.exceptions import PipelineError
 from pipeline_v2.params import PipelineParams
-from pipeline_v2.state import PipelineState
+from pipeline_v2.state import PIPELINE_VERSION, PipelineState
 from pipeline_v2.steps.embedding_refinement import EmbeddingRefiner
 from pipeline_v2.steps.export import Exporter
 from pipeline_v2.steps.segment import Segmenter
@@ -84,12 +84,12 @@ class PipelineV2:
             raise PipelineError("standardize", "no chunks")
         states: list[PipelineState] = []
         for idx, r in enumerate(results):
-            tag = make_extra_tags(audio_file=state.log_tag.get("audio_file", ""))
-            tag["audio_file"] = f"{tag['audio_file']}#chunk{idx}"
+            # Inherit the parent tag (audio_file=relative_path, version, ...) as
+            # a copy so per-chunk logging never mutates the shared parent dict.
             s = PipelineState(
                 audio_path=state.audio_path,
                 relative_path=state.relative_path,
-                log_tag=tag,
+                log_tag=dict(state.log_tag),
             )
             s.waveform = r.waveform
             s.sample_rate = r.sample_rate
@@ -203,10 +203,11 @@ class PipelineV2:
         # Non-ray convenience entrypoint. relative_path is the export id/join key
         # (the ray path supplies the manifest-relative one); with no manifest
         # here it falls back to the full audio_path so the id is never empty.
+        rel = relative_path if relative_path is not None else audio_path
         bootstrap = PipelineState(
             audio_path=audio_path,
-            relative_path=relative_path if relative_path is not None else audio_path,
-            log_tag=make_extra_tags(audio_file=os.path.basename(audio_path)),
+            relative_path=rel,
+            log_tag=make_extra_tags(audio_file=rel, version=PIPELINE_VERSION),
         )
         try:
             chunk_states = self.standardize(bootstrap)
