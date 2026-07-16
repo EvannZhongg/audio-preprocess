@@ -60,6 +60,7 @@ class _Progress:
     _log_progress is a plain method, not a closure over run_batch locals)."""
     total: int
     t_start: float
+    total_secs: float = 0.0  # total source audio seconds in this batch (progress/ETA by duration)
     n_done: int = 0          # files completed (success or failed)
     n_failed: int = 0        # files that failed (subset of n_done)
     seg_total: int = 0       # segments produced (success only)
@@ -218,7 +219,11 @@ class ClusterDriver:
                     ref_owner[ref] = actor
 
         logger.info(f"ray_shard_start shard {shard_name} files {len(pending)}")
-        prog = _Progress(total=len(pending), t_start=time.time(), last_t=time.time())
+        prog = _Progress(
+            total=len(pending),
+            total_secs=sum(it.duration for it in pending),  # audio seconds to process this batch
+            t_start=time.time(), last_t=time.time(),
+        )
         fill()
 
         while pending or ref_owner:
@@ -322,21 +327,27 @@ class ClusterDriver:
 
     @staticmethod
     def _log_progress(shard_name: str, p: "_Progress", tag: str = "ray_progress") -> None:
-        """Emit a progress + throughput line. Throughput = source audio seconds
-        processed / wallclock seconds, i.e. 'N times realtime'."""
+        """Emit a progress + throughput line. Progress and ETA are by audio
+        DURATION (audio_secs / total_secs), which is more accurate than file
+        count when file lengths vary. Throughput = audio seconds processed per
+        wallclock second, i.e. 'N times realtime'."""
         now = time.time()
         elapsed = now - p.t_start
         cum = p.n_done / elapsed if elapsed > 0 else 0.0            # files/s since start
         win_dt = now - p.last_t
         win = (p.n_done - p.last_done) / win_dt if win_dt > 0 else 0.0  # files/s, recent window
         throughput = p.audio_secs / elapsed if elapsed > 0 else 0.0  # audio-s per wallclock-s (x realtime)
-        eta = (p.total - p.n_done) / cum if cum > 0 else 0.0
-        pct = (100.0 * p.n_done / p.total) if p.total else 100.0
+        audio_hours = p.audio_secs / 3600.0                          # audio hours processed so far
+        total_hours = p.total_secs / 3600.0                          # audio hours in this batch
+        hours_per_day = throughput * 24.0                            # audio-hours per wallclock-day
+        pct = (100.0 * p.audio_secs / p.total_secs) if p.total_secs > 0 else 100.0
+        # ETA by remaining audio duration / current throughput (wallclock secs -> days).
+        eta_days = ((p.total_secs - p.audio_secs) / throughput / 86400.0) if throughput > 0 else 0.0
         logger.info(
-            f"{tag} shard {shard_name} {p.n_done}/{p.total} ({pct:.1f}%) "
-            f"failed {p.n_failed} "
-            f"{cum:.2f} files/s (now {win:.2f}) throughput {throughput:.1f}x "
-            f"segs {p.seg_total} eta {eta / 86400.0:.2f}day elapsed {elapsed:.0f}s"
+            f"{tag} shard {shard_name} {p.n_done}/{p.total} files failed {p.n_failed} "
+            f"audio {audio_hours:.1f}h/{total_hours:.1f}h ({pct:.1f}%) "
+            f"{cum:.2f} files/s (now {win:.2f}) throughput {throughput:.1f}x ({hours_per_day:.0f}h/day) "
+            f"segs {p.seg_total} eta {eta_days:.2f}day elapsed {elapsed:.0f}s"
         )
         p.last_t = now
         p.last_done = p.n_done
