@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--audio-root", help="audio root to resolve manifest relative_paths against")
     p.add_argument("--output", required=True, help="output folder for exported jsons")
     p.add_argument("--address", default="auto", help="ray cluster address")
+    p.add_argument("--min-duration", type=float, default=0.0,
+                   help="skip manifest files shorter than this many seconds "
+                        "(uses the manifest's duration column; 0 = no filter). "
+                        "Note: duration==0 means unknown/probe-failed, so it is "
+                        "also skipped when this is > 0. Only applies to --manifest.")
     args = p.parse_args()
     if bool(args.input) == bool(args.manifest):
         p.error("provide exactly one of --input or --manifest")
@@ -73,24 +78,36 @@ def collect_audio_paths(input_path: str) -> list[tuple[str, list[FileItem]]]:
     sys.exit(1)
 
 
-def collect_manifest_paths(manifest: str, audio_root: str) -> list[tuple[str, list[FileItem]]]:
+def collect_manifest_paths(manifest: str, audio_root: str,
+                           min_duration: float = 0.0) -> list[tuple[str, list[FileItem]]]:
     """Resolve a manifest against the audio root, grouped by shard: returns
     [(shard_name, [FileItem, ...]), ...] in shard order. One group per
     manifest_part-*.parquet so the driver processes shards one at a time. Kept
-    out of module import time so source_scan/pyarrow only load in this mode."""
+    out of module import time so source_scan/pyarrow only load in this mode.
+
+    If min_duration > 0, files whose manifest duration is below it are skipped
+    (duration==0 means unknown/probe-failed and is skipped too)."""
     from source_scan.manifest import list_shards, read_manifest
 
     shards = list_shards(manifest, "manifest") if os.path.isdir(manifest) else [manifest]
     groups: list[tuple[str, list[FileItem]]] = []
+    kept = skipped = 0
     for shard in shards:
         shard_name = os.path.splitext(os.path.basename(shard))[0]  # e.g. manifest_part-00000
-        rels = read_manifest(shard, columns=["relative_path"])["relative_path"].to_pylist()
-        items = [
-            FileItem(audio_path=os.path.join(audio_root, rel), relative_path=rel)
-            for rel in rels
-        ]
+        t = read_manifest(shard, columns=["relative_path", "duration"])
+        rels = t["relative_path"].to_pylist()
+        durs = t["duration"].to_pylist()
+        items = []
+        for rel, dur in zip(rels, durs):
+            if min_duration > 0 and (dur is None or dur < min_duration):
+                skipped += 1
+                continue
+            items.append(FileItem(audio_path=os.path.join(audio_root, rel), relative_path=rel))
+            kept += 1
         if items:
             groups.append((shard_name, items))
+    if min_duration > 0:
+        logger.info(f"min_duration_filter min {min_duration}s kept {kept} skipped {skipped}")
     return groups
 
 
@@ -98,8 +115,10 @@ def main() -> None:
     args = parse_args()
 
     if args.manifest:
-        groups = collect_manifest_paths(args.manifest, args.audio_root)
+        groups = collect_manifest_paths(args.manifest, args.audio_root, args.min_duration)
     else:
+        if args.min_duration > 0:
+            logger.warning("--min-duration ignored in --input mode (no manifest duration)")
         groups = collect_audio_paths(args.input)
     if not groups:
         logger.warning("no audio files to process")
