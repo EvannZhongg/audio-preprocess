@@ -102,7 +102,11 @@ def collect_manifest_paths(manifest: str, audio_root: str,
             if min_duration > 0 and (dur is None or dur < min_duration):
                 skipped += 1
                 continue
-            items.append(FileItem(audio_path=os.path.join(audio_root, rel), relative_path=rel))
+            items.append(FileItem(
+                audio_path=os.path.join(audio_root, rel),
+                relative_path=rel,
+                duration=dur or 0.0,
+            ))
             kept += 1
         if items:
             groups.append((shard_name, items))

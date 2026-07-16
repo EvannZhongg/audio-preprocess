@@ -42,6 +42,7 @@ from pipeline_v2_ray.segments import (SEG_SHARD_SIZE, error_record,
 
 RECONCILE_INTERVAL = 60.0   # seconds between cluster-size reconciliations
 WAIT_TIMEOUT = 5.0          # ray.wait poll timeout; also bounds reconcile latency
+PROGRESS_INTERVAL = 30.0    # seconds between progress/throughput log lines
 
 
 @dataclass
@@ -50,6 +51,21 @@ class FileItem:
     per file, since a batch is exactly one manifest shard."""
     audio_path: str      # full filesystem path to decode
     relative_path: str   # path relative to audio root; export id hash + join key
+    duration: float = 0.0  # source audio seconds (from manifest); for RTF throughput
+
+
+@dataclass
+class _Progress:
+    """Mutable per-shard counters for throughput logging (kept in a dataclass so
+    _log_progress is a plain method, not a closure over run_batch locals)."""
+    total: int
+    t_start: float
+    n_done: int = 0          # files completed (success or failed)
+    n_failed: int = 0        # files that failed (subset of n_done)
+    seg_total: int = 0       # segments produced (success only)
+    audio_secs: float = 0.0  # source audio seconds of completed files (for RTF)
+    last_t: float = 0.0      # wallclock of the last progress log
+    last_done: int = 0       # n_done at the last progress log
 
 
 @dataclass
@@ -202,6 +218,7 @@ class ClusterDriver:
                     ref_owner[ref] = actor
 
         logger.info(f"ray_shard_start shard {shard_name} files {len(pending)}")
+        prog = _Progress(total=len(pending), t_start=time.time(), last_t=time.time())
         fill()
 
         while pending or ref_owner:
@@ -210,6 +227,10 @@ class ClusterDriver:
                 self._reconcile()
                 fill()
                 self._last_reconcile = time.time()
+
+            # Periodic progress / throughput line.
+            if time.time() - prog.last_t >= PROGRESS_INTERVAL:
+                self._log_progress(shard_name, prog)
 
             if not ref_owner:
                 # No work in flight but files remain -> cluster has no slots
@@ -236,9 +257,15 @@ class ClusterDriver:
                 logger.error(f"ray_actor_crash file {path} err {e}")
                 results.append(FileResult(path, success=False, error=f"actor crashed: {e}"))
                 seg_buffer.append(error_record(item.relative_path, f"actor crashed: {e}"))
+                prog.n_done += 1
+                prog.n_failed += 1
+                prog.audio_secs += item.duration
                 for lost_ref, lost_item in actor.inflight.items():
                     results.append(FileResult(lost_item.audio_path, success=False, error="actor crashed"))
                     seg_buffer.append(error_record(lost_item.relative_path, "actor crashed"))
+                    prog.n_done += 1
+                    prog.n_failed += 1
+                    prog.audio_secs += lost_item.duration
                     ref_owner.pop(lost_ref, None)
                 actor.inflight.clear()
                 self._drop(actor)
@@ -249,15 +276,22 @@ class ClusterDriver:
                 logger.error(f"ray_task_error file {path} err {type(e).__name__}: {e}")
                 results.append(FileResult(path, success=False, error=f"task error: {e}"))
                 seg_buffer.append(error_record(item.relative_path, f"task error: {e}"))
+                prog.n_done += 1
+                prog.n_failed += 1
+                prog.audio_secs += item.duration
                 fill()
                 continue
 
             results.append(self._log_result(fr))
+            prog.n_done += 1
+            prog.audio_secs += item.duration
             # Success -> its segment rows; failure -> one placeholder error row
             # (so the failure is recorded and resume won't retry it forever).
             if fr.success:
                 seg_buffer.extend(fr.segments)
+                prog.seg_total += len(fr.segments)
             else:
+                prog.n_failed += 1
                 seg_buffer.append(error_record(item.relative_path, fr.error))
             if len(seg_buffer) >= SEG_SHARD_SIZE:
                 flush()
@@ -283,8 +317,29 @@ class ClusterDriver:
         for actor in [a for a in self._actors if a.draining and not a.inflight]:
             self._retire(actor)
             self._drop(actor)
-        logger.info(f"ray_shard_done shard {shard_name} files {len(results)}")
+        self._log_progress(shard_name, prog, tag="ray_shard_done")
         return results
+
+    @staticmethod
+    def _log_progress(shard_name: str, p: "_Progress", tag: str = "ray_progress") -> None:
+        """Emit a progress + throughput line. Throughput = source audio seconds
+        processed / wallclock seconds, i.e. 'N times realtime'."""
+        now = time.time()
+        elapsed = now - p.t_start
+        cum = p.n_done / elapsed if elapsed > 0 else 0.0            # files/s since start
+        win_dt = now - p.last_t
+        win = (p.n_done - p.last_done) / win_dt if win_dt > 0 else 0.0  # files/s, recent window
+        throughput = p.audio_secs / elapsed if elapsed > 0 else 0.0  # audio-s per wallclock-s (x realtime)
+        eta = (p.total - p.n_done) / cum if cum > 0 else 0.0
+        pct = (100.0 * p.n_done / p.total) if p.total else 100.0
+        logger.info(
+            f"{tag} shard {shard_name} {p.n_done}/{p.total} ({pct:.1f}%) "
+            f"failed {p.n_failed} "
+            f"{cum:.2f} files/s (now {win:.2f}) throughput {throughput:.1f}x "
+            f"segs {p.seg_total} eta {eta / 86400.0:.2f}day elapsed {elapsed:.0f}s"
+        )
+        p.last_t = now
+        p.last_done = p.n_done
 
     @staticmethod
     def _log_result(r: FileResult) -> FileResult:
