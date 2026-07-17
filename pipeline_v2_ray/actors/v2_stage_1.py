@@ -93,39 +93,47 @@ class GpuPipelineActor(PipelineActor):
     def _process_file_inner(self, audio_path: str, output_folder: str,
                             relative_path: str, shard: str) -> dict:
         log_tag = make_extra_tags(audio_file=relative_path, version=PIPELINE_VERSION)
-        # A decode failure means the whole file is unusable -> let the outer
-        # guard in process_file turn it into a failed result.
-        chunk_states = self._pipeline.standardize(
-            PipelineState(audio_path=audio_path, relative_path=relative_path,
-                          shard=shard, log_tag=log_tag)
-        )
+        try:
+            # A decode failure means the whole file is unusable -> let the outer
+            # guard in process_file turn it into a failed result.
+            chunk_states = self._pipeline.standardize(
+                PipelineState(audio_path=audio_path, relative_path=relative_path,
+                              shard=shard, log_tag=log_tag)
+            )
 
-        n_segments = 0
-        failed_chunks = 0
-        records: list = []
-        for idx, state in enumerate(chunk_states):
-            t0 = time.perf_counter()
-            try:
-                # GPU stages are exclusive; decode/export of other files overlap.
-                with self._gpu_lock:
-                    state, vad_dur, refine_dur = self._pipeline.run_gpu_stages(state)
-                    torch.cuda.synchronize()
-                self._pipeline.export(state, idx, output_folder)
-                n_segments += len(state.segment_list or [])
-                records.extend(state.export_records or [])
-                PipelineV2.log_chunk_stats(state, t0, vad_dur, refine_dur)
-            except Exception as e:  # noqa: BLE001 - one bad chunk must not sink the rest
-                failed_chunks += 1
-                logger.error(f"ray_chunk_failed {type(e).__name__}: {e}", extra=state.log_tag)
+            n_segments = 0
+            failed_chunks = 0
+            records: list = []
+            for idx, state in enumerate(chunk_states):
+                t0 = time.perf_counter()
+                try:
+                    # GPU stages are exclusive; decode/export of other files overlap.
+                    with self._gpu_lock:
+                        state, vad_dur, refine_dur = self._pipeline.run_gpu_stages(state)
+                        torch.cuda.synchronize()
+                    self._pipeline.export(state, idx, output_folder)
+                    n_segments += len(state.segment_list or [])
+                    records.extend(state.export_records or [])
+                    PipelineV2.log_chunk_stats(state, t0, vad_dur, refine_dur)
+                except Exception as e:  # noqa: BLE001 - one bad chunk must not sink the rest
+                    failed_chunks += 1
+                    logger.error(f"ray_chunk_failed {type(e).__name__}: {e}", extra=state.log_tag)
 
-        success = failed_chunks == 0 and len(chunk_states) > 0
-        error = "" if success else f"{failed_chunks}/{len(chunk_states)} chunks failed"
-        # Any chunk failure fails the whole file: drop even the successful
-        # chunks' segments so the segment table holds only fully-good files. The
-        # file has no recorded segments -> resume reprocesses it on rerun; any
-        # partial wav/json already on disk are harmless orphans, overwritten on
-        # the deterministic-id rerun. Failures are surfaced via logs, not a table.
-        return FileResult(
-            audio_path, success=success, n_segments=n_segments,
-            error=error, segments=records if success else [],
-        ).to_dict()
+            success = failed_chunks == 0 and len(chunk_states) > 0
+            error = "" if success else f"{failed_chunks}/{len(chunk_states)} chunks failed"
+            # Any chunk failure fails the whole file: drop even the successful
+            # chunks' segments so the segment table holds only fully-good files. The
+            # file has no recorded segments -> resume reprocesses it on rerun; any
+            # partial wav/json already on disk are harmless orphans, overwritten on
+            # the deterministic-id rerun. Failures are surfaced via logs, not a table.
+            return FileResult(
+                audio_path, success=success, n_segments=n_segments,
+                error=error, segments=records if success else [],
+            ).to_dict()
+        finally:
+            # Reclaim this file's cached GPU blocks (mirrors PipelineV2.run's
+            # finally in the non-ray path) so a long-lived actor doesn't
+            # accumulate VRAM. Under the GPU lock so it doesn't sync the device
+            # while another concurrent file is mid-GPU-stage.
+            with self._gpu_lock:
+                torch.cuda.empty_cache()
