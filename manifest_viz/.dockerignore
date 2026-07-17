@@ -1,0 +1,12 @@
+# 数据文件与本地状态,不进镜像:
+#  - superset.db      本地 SQLite 元数据库(容器改用 MySQL）
+#  - manifest.duckdb  数据源库,内含指向本机绝对路径的视图,容器里无效
+#  - .superset_initialized  本地初始化标记(容器每次自行初始化）
+superset.db
+manifest.duckdb
+.superset_initialized
+
+# Python 缓存与临时物
+__pycache__/
+*.pyc
+*.tmp
