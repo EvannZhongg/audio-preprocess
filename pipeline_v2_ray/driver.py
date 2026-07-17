@@ -33,7 +33,7 @@ import ray
 from ray.exceptions import RayActorError
 
 import logger
-from pipeline_v2_ray.actor import GpuPipelineActor
+from pipeline_v2_ray.actors.base import new_actor
 from pipeline_v2_ray.config import (GPU_FRACTION_PER_ACTOR, PIPE_SLOT_RESOURCE,
                                     RayConfig)
 from pipeline_v2_ray.result import FileResult
@@ -85,8 +85,11 @@ class _Actor:
 
 
 class ClusterDriver:
-    def __init__(self, ray_config: RayConfig) -> None:
+    def __init__(self, ray_config: RayConfig, actor_name: str) -> None:
         self._config = ray_config
+        # CLI-selected actor name; resolved to a ray actor handle per spawn via
+        # actors.base.new_actor. The driver stays agnostic to the concrete actor.
+        self._actor_name = actor_name
         # Actor pool persists across batches (start -> run_batch* -> shutdown),
         # so models are loaded once, not per manifest shard.
         self._actors: list[_Actor] = []
@@ -101,16 +104,16 @@ class ClusterDriver:
         return int(ray.cluster_resources().get(PIPE_SLOT_RESOURCE, 0))
 
     def _spawn_actor(self) -> _Actor:
-        handle = GpuPipelineActor.options(
-            # num_cpus=0: CPU is not a scheduling gate here -- pipe_slot alone
-            # caps actors per machine. (num_gpus=0.01 stays: it's not throttling
-            # either, it's what makes Ray set CUDA_VISIBLE_DEVICES so the actor's
-            # card shows up as cuda:0 / gets its own GPU on multi-card nodes.)
-            num_cpus=0,
+        # new_actor resolves the CLI name to the registered actor and returns a
+        # ready handle. Scheduling resources are driver policy, passed in here:
+        # num_gpus=0.01 only makes Ray set CUDA_VISIBLE_DEVICES (per-card
+        # placement), pipe_slot is the real per-machine concurrency gate.
+        handle = new_actor(
+            self._actor_name, self._config,
             num_gpus=GPU_FRACTION_PER_ACTOR,
-            resources={PIPE_SLOT_RESOURCE: 1},
+            slot_resource=PIPE_SLOT_RESOURCE,
             max_concurrency=self._config.defaults.max_concurrency,
-        ).remote(self._config)
+        )
         # No readiness probe: Ray queues process_file calls behind __init__, so
         # work simply waits for model loading. A fatal init (bad config, no GPU)
         # surfaces as RayActorError on the first ray.get and is handled there.
@@ -212,7 +215,7 @@ class ClusterDriver:
                     item = pending.popleft()
                     # export adds audios/jsons + hash-bucket levels beneath shard_out.
                     ref = actor.handle.process_file.remote(
-                        item.audio_path, shard_out, item.relative_path
+                        item.audio_path, shard_out, item.relative_path, shard_name
                     )
                     actor.inflight[ref] = item
                     actor.files_submitted += 1
@@ -261,13 +264,13 @@ class ClusterDriver:
                 # Replacement is left to reconcile.
                 logger.error(f"ray_actor_crash file {path} err {e}")
                 results.append(FileResult(path, success=False, error=f"actor crashed: {e}"))
-                seg_buffer.append(error_record(item.relative_path, f"actor crashed: {e}"))
+                seg_buffer.append(error_record(item.relative_path, shard_name, f"actor crashed: {e}"))
                 prog.n_done += 1
                 prog.n_failed += 1
                 prog.audio_secs += item.duration
                 for lost_ref, lost_item in actor.inflight.items():
                     results.append(FileResult(lost_item.audio_path, success=False, error="actor crashed"))
-                    seg_buffer.append(error_record(lost_item.relative_path, "actor crashed"))
+                    seg_buffer.append(error_record(lost_item.relative_path, shard_name, "actor crashed"))
                     prog.n_done += 1
                     prog.n_failed += 1
                     prog.audio_secs += lost_item.duration
@@ -280,7 +283,7 @@ class ClusterDriver:
                 # this file; keep the actor and its other in-flight work.
                 logger.error(f"ray_task_error file {path} err {type(e).__name__}: {e}")
                 results.append(FileResult(path, success=False, error=f"task error: {e}"))
-                seg_buffer.append(error_record(item.relative_path, f"task error: {e}"))
+                seg_buffer.append(error_record(item.relative_path, shard_name, f"task error: {e}"))
                 prog.n_done += 1
                 prog.n_failed += 1
                 prog.audio_secs += item.duration
@@ -290,14 +293,15 @@ class ClusterDriver:
             results.append(self._log_result(fr))
             prog.n_done += 1
             prog.audio_secs += item.duration
-            # Success -> its segment rows; failure -> one placeholder error row
-            # (so the failure is recorded and resume won't retry it forever).
+            # Success -> its segment rows (already complete, incl. shard);
+            # failure -> one placeholder error row (recorded so resume won't
+            # retry it forever).
             if fr.success:
                 seg_buffer.extend(fr.segments)
                 prog.seg_total += len(fr.segments)
             else:
                 prog.n_failed += 1
-                seg_buffer.append(error_record(item.relative_path, fr.error))
+                seg_buffer.append(error_record(item.relative_path, shard_name, fr.error))
             if len(seg_buffer) >= SEG_SHARD_SIZE:
                 flush()
 

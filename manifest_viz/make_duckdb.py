@@ -19,8 +19,8 @@ import argparse
 import duckdb
 
 p = argparse.ArgumentParser()
-p.add_argument("--db", required=True, help="DuckDB 库文件路径")
-p.add_argument("--view", required=True, help="视图名")
+p.add_argument("--db", required=True, help="DuckDB 库文件路径") # 打开/创建这个 .duckdb 文件 和database同级
+p.add_argument("--view", required=True, help="视图名") # 创建视图 和表同级
 p.add_argument("--parquet", required=True, help="parquet glob,如 '/data/zh/*.parquet'")
 args = p.parse_args()
 

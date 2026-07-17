@@ -23,9 +23,10 @@ SEG_SHARD_SIZE = 100_000
 SEGMENT_SCHEMA = pa.schema([
     ("utt_id", pa.string()),
     ("source", pa.string()),
+    ("shard", pa.string()),          # manifest shard (also the output subdir); for cross-shard queries
     ("pipeline_version", pa.string()),
     ("chunk_index", pa.int32()),
-    ("chunk_audio_path", pa.string()),
+    ("chunk_audio_path", pa.string()),  # RELATIVE to output_root: <shard>/audios/<bucket>/<file>.wav
     ("sample_rate", pa.int32()),
     ("chunk_duration", pa.float64()),
     ("speaker_id", pa.string()),
@@ -40,12 +41,13 @@ SEGMENT_SCHEMA = pa.schema([
 ])
 
 
-def error_record(source: str, error: str) -> SegmentRecord:
-    """A single placeholder row for a failed file: source + error set, all
+def error_record(source: str, shard: str, error: str) -> SegmentRecord:
+    """A single placeholder row for a failed file: source/shard + error set, all
     segment fields NULL. Keeps failures in the same table (queryable, and
     counted by resume so a failed file isn't retried forever)."""
     rec: SegmentRecord = {k: None for k in SEGMENT_SCHEMA.names}  # type: ignore[assignment]
     rec["source"] = source
+    rec["shard"] = shard
     rec["pipeline_version"] = PIPELINE_VERSION
     rec["error"] = error
     return rec

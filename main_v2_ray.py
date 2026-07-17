@@ -31,6 +31,8 @@ from pathlib import Path
 import ray
 
 import logger
+import pipeline_v2_ray.actors  # noqa: F401 -- importing the package registers all actors
+from pipeline_v2_ray.actors.base import ACTOR_REGISTRY
 from pipeline_v2_ray.config import load_ray_config
 from pipeline_v2_ray.driver import ClusterDriver, FileItem
 from utils.tool import get_audio_files
@@ -46,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input", help="audio file or folder")
     p.add_argument("--manifest", help="manifest parquet (file or shard dir) from build_manifest.py")
     p.add_argument("--audio-root", help="audio root to resolve manifest relative_paths against")
+    p.add_argument("--actor", default="v2_stage_1", choices=sorted(ACTOR_REGISTRY),
+                   help="which processing actor to run")
     p.add_argument("--output", required=True, help="output folder for exported jsons")
     p.add_argument("--address", default="auto", help="ray cluster address")
     p.add_argument("--min-duration", type=float, default=0.0,
@@ -129,7 +133,7 @@ def main() -> None:
         sys.exit(0)
 
     ray.init(address=args.address, ignore_reinit_error=True)
-    driver = ClusterDriver(load_ray_config(args.ray_config))
+    driver = ClusterDriver(load_ray_config(args.ray_config), args.actor)
     results = []
     try:
         driver.start()

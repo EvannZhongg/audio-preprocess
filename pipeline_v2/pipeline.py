@@ -16,6 +16,7 @@ from pipeline_v2.params import PipelineParams
 from pipeline_v2.state import PIPELINE_VERSION, PipelineState
 from pipeline_v2.steps.embedding_refinement import EmbeddingRefiner
 from pipeline_v2.steps.export import Exporter
+from pipeline_v2.steps.metrics import MetricsScorer
 from pipeline_v2.steps.segment import Segmenter
 from pipeline_v2.steps.source_separation import Separator
 from pipeline_v2.steps.speaker_diarization import Diarizer
@@ -42,6 +43,7 @@ class PipelineV2:
             else None
         )
         self.segmenter: Segmenter = Segmenter(params.segmenter, self.vad_detector.vad_model)
+        self.metrics_scorer: MetricsScorer = MetricsScorer(params.metrics, params.device_name)
         self.exporter: Exporter = Exporter()
         self._funasr_warmup = self._load_funasr_warmup(params)
 
@@ -89,6 +91,7 @@ class PipelineV2:
             s = PipelineState(
                 audio_path=state.audio_path,
                 relative_path=state.relative_path,
+                shard=state.shard,
                 log_tag=dict(state.log_tag),
             )
             s.waveform = r.waveform
@@ -158,6 +161,19 @@ class PipelineV2:
         state.segment_list = segment_list
         return state
 
+    def metrics(self, state: PipelineState) -> PipelineState:
+        # Scores each segment (dnsmos/c50/snr) AND drops those below the config's
+        # quality thresholds, so state.segment_list becomes the kept segments.
+        if state.segment_list is None or state.waveform is None or state.sample_rate is None:
+            raise PipelineError("metrics", "segment_list/waveform/sample_rate missing")
+        scored = self.metrics_scorer.run(
+            state.segment_list, state.waveform, state.sample_rate, log_tag=state.log_tag
+        )
+        if scored is None:
+            raise PipelineError("metrics", "scored is None")
+        state.segment_list = scored
+        return state
+
     def export(self, state: PipelineState, chunk_index: int, output_folder: str) -> PipelineState:
         if state.segment_list is None:
             raise PipelineError("export", "segment_list missing")
@@ -165,7 +181,7 @@ class PipelineV2:
             raise PipelineError("export", "waveform/sample_rate missing")
         records = self.exporter.run(
             state.segment_list, state.waveform, state.sample_rate,
-            state.relative_path, chunk_index, output_folder,
+            state.relative_path, state.shard, chunk_index, output_folder,
             log_tag=state.log_tag,
         )
         if records is None:
@@ -176,7 +192,7 @@ class PipelineV2:
     def run_gpu_stages(self, state: PipelineState) -> tuple[PipelineState, float, float]:
         """Run the GPU-bound stages on a pre-standardized state.
 
-        separate -> diarize -> vad -> refine_embeddings -> segment.
+        separate -> diarize -> vad -> refine_embeddings -> segment -> metrics.
 
         Export is intentionally excluded so callers can pipeline export IO
         (mp3 encode + disk write) with the next chunk's GPU work. Must be
@@ -193,13 +209,15 @@ class PipelineV2:
         state = self.refine_embeddings(state)
         refine_dur = sum(s.end - s.start for s in state.vad_list or [])
         state = self.segment(state)
+        state = self.metrics(state)
         return state, vad_dur, refine_dur
 
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
     def run(self, audio_path: str, output_folder: str,
-            relative_path: Optional[str] = None) -> list[PipelineState]:
+            relative_path: Optional[str] = None,
+            shard: Optional[str] = None) -> list[PipelineState]:
         # Non-ray convenience entrypoint. relative_path is the export id/join key
         # (the ray path supplies the manifest-relative one); with no manifest
         # here it falls back to the full audio_path so the id is never empty.
@@ -207,6 +225,7 @@ class PipelineV2:
         bootstrap = PipelineState(
             audio_path=audio_path,
             relative_path=rel,
+            shard=shard,
             log_tag=make_extra_tags(audio_file=rel, version=PIPELINE_VERSION),
         )
         try:

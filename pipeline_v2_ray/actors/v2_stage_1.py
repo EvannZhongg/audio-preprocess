@@ -27,6 +27,7 @@ import logger
 from logger import make_extra_tags
 from pipeline_v2.pipeline import PipelineV2
 from pipeline_v2.state import PIPELINE_VERSION, PipelineState
+from pipeline_v2_ray.actors.base import PipelineActor, register_actor
 from pipeline_v2_ray.config import RayConfig
 from pipeline_v2_ray.result import FileResult
 
@@ -44,8 +45,9 @@ def _setup_env() -> None:
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 
+@register_actor("v2_stage_1")
 @ray.remote
-class GpuPipelineActor:
+class GpuPipelineActor(PipelineActor):
     def __init__(self, ray_config: RayConfig) -> None:
         # Actors on a pre-started cluster are separate daemons that do NOT
         # inherit the driver's environment, so set the temp-dir / allocator
@@ -73,26 +75,29 @@ class GpuPipelineActor:
             f"ray_actor_ready gpu {self._gpu_name} profile {self._profile_name}"
         )
 
-    def process_file(self, audio_path: str, output_folder: str, relative_path: str) -> dict:
+    def process_file(self, audio_path: str, output_folder: str,
+                     relative_path: str, shard: str) -> dict:
         """Process one file; returns a serializable FileResult dict. Runs on a
         Ray worker thread (max_concurrency>1), overlapping its decode/export
         with other files' GPU work. Never raises: any error (including edge
         cases outside the inner per-stage handlers) becomes a failed result, so
         the driver never sees this as an actor-level crash."""
         try:
-            return self._process_file_inner(audio_path, output_folder, relative_path)
+            return self._process_file_inner(audio_path, output_folder, relative_path, shard)
         except Exception as e:  # noqa: BLE001 - last-resort guard; keep the actor alive
             logger.error(f"ray_process_file_error file {audio_path} err {type(e).__name__}: {e}")
             return FileResult(
                 audio_path, success=False, error=f"{type(e).__name__}: {e}"
             ).to_dict()
 
-    def _process_file_inner(self, audio_path: str, output_folder: str, relative_path: str) -> dict:
+    def _process_file_inner(self, audio_path: str, output_folder: str,
+                            relative_path: str, shard: str) -> dict:
         log_tag = make_extra_tags(audio_file=relative_path, version=PIPELINE_VERSION)
         # A decode failure means the whole file is unusable -> let the outer
         # guard in process_file turn it into a failed result.
         chunk_states = self._pipeline.standardize(
-            PipelineState(audio_path=audio_path, relative_path=relative_path, log_tag=log_tag)
+            PipelineState(audio_path=audio_path, relative_path=relative_path,
+                          shard=shard, log_tag=log_tag)
         )
 
         n_segments = 0

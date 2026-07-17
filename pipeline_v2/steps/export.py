@@ -21,6 +21,7 @@ class Exporter:
         waveform: np.ndarray,
         sample_rate: int,
         relative_path: str,
+        shard: Optional[str],
         chunk_index: int,
         output_folder: str,
         log_tag: Optional[dict] = None,
@@ -56,11 +57,17 @@ class Exporter:
 
             audio_path_out = os.path.join(audio_dir, f"{file_name}.wav")
             write_wav(audio_path_out, sample_rate, waveform)
+            # Path stored in the record is RELATIVE to output_root and prefixed
+            # with the shard (<shard>/audios/<bucket>/<file>.wav) so it's
+            # self-contained and mount-independent. Falls back to shard-dir
+            # relative when shard is unknown (non-ray --input mode).
+            rel_parts = ["audios", bucket, f"{file_name}.wav"]
+            audio_rel = os.path.join(shard, *rel_parts) if shard else os.path.join(*rel_parts)
 
             chunk_duration = round(len(waveform) / sample_rate, 5)
             records = [
-                self._segment_record(s, file_name, relative_path, chunk_index,
-                                     audio_path_out, sample_rate, chunk_duration)
+                self._segment_record(s, file_name, relative_path, shard, chunk_index,
+                                     audio_rel, sample_rate, chunk_duration)
                 for s in segment_list
             ]
 
@@ -70,7 +77,7 @@ class Exporter:
                 "source": relative_path,
                 "pipeline_version": PIPELINE_VERSION,
                 "chunk_index": chunk_index,
-                "audio_path": audio_path_out,
+                "audio_path": audio_rel,
                 "sample_rate": sample_rate,
                 "duration": chunk_duration,
                 "sentences": [self._segment_to_dict(s, file_name) for s in segment_list],
@@ -92,15 +99,16 @@ class Exporter:
 
     @staticmethod
     def _segment_record(seg: Segment, file_name: str, relative_path: str,
-                        chunk_index: int, audio_path_out: str, sample_rate: int,
-                        chunk_duration: float) -> SegmentRecord:
+                        shard: Optional[str], chunk_index: int, audio_rel: str,
+                        sample_rate: int, chunk_duration: float) -> SegmentRecord:
         """Flat row for segments_part parquet (mirrors SEGMENT_SCHEMA)."""
         return {
             "utt_id": f"{file_name}_{seg.index}",
             "source": relative_path,
+            "shard": shard,
             "pipeline_version": PIPELINE_VERSION,
             "chunk_index": chunk_index,
-            "chunk_audio_path": audio_path_out,
+            "chunk_audio_path": audio_rel,
             "sample_rate": sample_rate,
             "chunk_duration": chunk_duration,
             "speaker_id": seg.speaker,

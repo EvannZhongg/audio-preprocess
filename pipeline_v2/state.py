@@ -26,9 +26,11 @@ class SegmentRecord(TypedDict):
     import it without an upward dependency."""
     utt_id: Optional[str]             # {base}_chunk{ci}_{seg.index}; None on a failed-file row
     source: str                       # relative_path; join key to stage-0 manifest
+    shard: Optional[str]              # manifest shard name; stamped by the driver (its output dir)
     pipeline_version: str
     chunk_index: Optional[int]
-    chunk_audio_path: Optional[str]   # exported wav (segment = time range within it)
+    chunk_audio_path: Optional[str]   # wav path RELATIVE to output_root, incl. shard prefix:
+                                      #   <shard>/audios/<bucket>/<file>.wav  (None on failed-file rows)
     sample_rate: Optional[int]
     chunk_duration: Optional[float]   # seconds
     speaker_id: Optional[str]
@@ -75,6 +77,9 @@ class PipelineState:
     # Its SHA-1 is the export id `base` -> stable across mount points + joinable.
     # None in --input mode; export falls back to hashing audio_path.
     relative_path: Optional[str] = None
+    # Manifest shard this file belongs to (its output subdir). Threaded to export
+    # so it fills the segment row's `shard` column and the <shard>/... path prefix.
+    shard: Optional[str] = None
     waveform: Optional[np.ndarray] = None
     sample_rate: Optional[int] = None
     duration: Optional[float] = None
