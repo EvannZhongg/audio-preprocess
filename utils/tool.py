@@ -90,7 +90,7 @@ def get_audio_files(folder_path):
         for file in files:
             if ".temp" in file:
                 continue
-            if file.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
+            if file.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4", ".ogg", ".webm")):
                 audio_files.append(os.path.join(root, file))
     return audio_files
 
@@ -379,12 +379,27 @@ def export_to_metadata(audio, asr_result, folder_path, meta_info, file_name):
                 "norm_text": segment.get("norm_text", ""),
                 "wer": f'{segment.get("wer", 0.):.4f}',
                 "avg_char_duration": f'{segment.get("avg_char_duration", 0.2):.4f}',
+                "speaking_rate": f'{segment.get("speaking_rate", -1):.4f}',
+                "alignment_score": f'{segment.get("alignment_score", -1):.4f}',
+                "abnormal_silence_count": int(segment.get("abnormal_silence_count", -1)),
             },
-            "metrics_info":{
+            "audio_quality_info":{
                 "dnsmos": f'{segment.get("dnsmos", 0.0):.4f}',
                 "c50": f'{segment.get("c50", 0.0):.4f}',
                 "snr": f'{segment.get("snr", 0.0):.4f}',
-            }
+            },
+            "text_quality_info": {
+                "ppl": f'{segment.get("ppl", -1):.4f}',
+                "spell_score": f'{segment.get("spell_score", -1):.4f}',
+                "llm_quality": f'{segment.get("llm_quality", -1):.4f}',
+                "semantic_completeness": f'{segment.get("semantic_completeness", -1):.4f}',
+                "tts_suitability": f'{segment.get("tts_suitability", -1):.4f}',
+            },
+            "domain_info": segment.get("domain_info", {
+                "text_domain": {"domain": "unknown", "scenario": "unknown", "style": "unknown"},
+                "acoustic_domain": {"environment": "unknown", "background": "unknown", "quality": "unknown"},
+                "speaker_domain": {"gender": "unknown", "age_group": "unknown", "accent": "unknown"},
+            })
         }
         meta_info.add_sentence(setence_metadata)
 

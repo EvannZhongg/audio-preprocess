@@ -26,12 +26,39 @@ META_INFO_TEMPLATE = {
                 "norm_text": "今天天气真好。",
                 "language": "zh",
                 "wer": 0.15,
-                "avg_char_duration": 0.2
+                "avg_char_duration": 0.2,
+                "speaking_rate": -1.0,
+                "alignment_score": -1.0,
+                "abnormal_silence_count": -1
             },
-            "quality_info": {
+            "audio_quality_info": {
                 "snr": 20,
                 "c50": 40,
                 "dnsmos": 3
+            },
+            "text_quality_info": {
+                "ppl": -1.0,
+                "spell_score": -1.0,
+                "llm_quality": -1.0,
+                "semantic_completeness": -1.0,
+                "tts_suitability": -1.0
+            },
+            "domain_info": {
+                "text_domain": {
+                    "domain": "unknown",
+                    "scenario": "unknown",
+                    "style": "unknown"
+                },
+                "acoustic_domain": {
+                    "environment": "unknown",
+                    "background": "unknown",
+                    "quality": "unknown"
+                },
+                "speaker_domain": {
+                    "gender": "unknown",
+                    "age_group": "unknown",
+                    "accent": "unknown"
+                }
             },
             "speaker_info": {},
             "paralinguistics_info": {}

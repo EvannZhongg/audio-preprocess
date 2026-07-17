@@ -44,11 +44,20 @@ class FunASR:
                     disable_update=True,
                     **kwargs,
                 )
+            elif asr_model == "FunASRNano":
+                self.model = AutoModel(
+                    model=model_dir,
+                    vad_kwargs={"max_single_segment_time": 30000},
+                    device=device,
+                    trust_remote_code=True,
+                    disable_update=True,
+                    **kwargs,
+                )
             elif asr_model == "ParaFormer":
                 self.model = pipeline(
                     task=Tasks.auto_speech_recognition,
                     model=model_dir,
-                    punc_model=punc_model_dir, 
+                    punc_model=punc_model_dir,
                     device=device,
                     disable_update=True
                 )
@@ -144,6 +153,16 @@ class FunASR:
                                 language="auto",
                                 use_itn=True,
                                 batch_size_s=0, # Disable internal dynamic batching to control strictly
+                                batch_size=len(batch_paths)
+                            )
+                            batch_results_chunk = res if isinstance(res, list) else [res]
+
+                        elif self.asr_model == "FunASRNano":
+                            res = self.model.generate(
+                                input=batch_paths,
+                                language="auto",
+                                itn=True,
+                                batch_size_s=0,
                                 batch_size=len(batch_paths)
                             )
                             batch_results_chunk = res if isinstance(res, list) else [res]

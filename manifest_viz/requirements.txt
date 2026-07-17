@@ -1,0 +1,9 @@
+# manifest_viz 服务依赖(Superset + DuckDB 方案）。
+# 安装:pip install -r manifest_viz/requirements.txt
+apache-superset==6.1.0
+duckdb-engine==0.17.0
+duckdb==1.5.4
+requests==2.32.5   # build_dashboard.py 调 Superset REST API 用
+PyMySQL==1.1.1     # MySQL 元数据库驱动(纯 Python，mysql+pymysql://）
+rich==14.1.0       # Superset CLI(superset db/test-db 等)依赖，但未声明为硬依赖
+cachetools==5.5.2  # 同上，Superset 运行时用到但未声明

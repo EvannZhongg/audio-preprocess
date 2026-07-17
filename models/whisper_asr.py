@@ -123,10 +123,14 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
             audio = load_audio(audio)
 
         def data(audio, segments):
+            max_frames = SAMPLE_RATE * 30
             for seg in segments:
                 f1 = int(seg["start"] * SAMPLE_RATE)
                 f2 = int(seg["end"] * SAMPLE_RATE)
-                yield {"inputs": audio[f1:f2]}
+                chunk = audio[f1:f2]
+                if len(chunk) > max_frames:
+                    chunk = chunk[:max_frames]
+                yield {"inputs": chunk}
 
         if self.tokenizer is None:
             language = language or self.detect_language(audio)
@@ -171,6 +175,7 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
             text = out["text"]
             if batch_size in [0, 1, None]:
                 text = text[0]
+            text = text.strip()
             segments.append(
                 {
                     "text": text,

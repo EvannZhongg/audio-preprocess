@@ -7,13 +7,22 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from pipeline.alignment_filter import (compute_alignment_score,
+                                       filter_by_alignment)
 from pipeline.asr_process import asr
+from pipeline.domain_annotation import annotate_domains
 from pipeline.metrics_prediction import filter_by_metrics, metrics_prediction
 from pipeline.pipeline_report import (append_to_report,
                                       print_processing_summary, update_stats)
 from pipeline.source_separation import source_separation
 from pipeline.speaker_diarization import speaker_diarization
+from pipeline.speaking_rate import (analyze_speaking_rate,
+                                    filter_by_speaking_rate)
+from pipeline.silence_filter import (detect_abnormal_silence,
+                                     filter_by_abnormal_silence)
 from pipeline.standardization import standardization
+from pipeline.text_quality_filtering import (filter_by_text_quality,
+                                             text_quality_prediction)
 from pipeline.vad_process import (cut_by_speaker_label,
                                   refine_vad_list_by_embedding)
 from utils.meta_info_config import MetaConfig
@@ -76,7 +85,11 @@ def main_process(manifest_entry, output_folder, report_path):
             'embedding_refinement': {'discarded_count': 0, 'discarded_duration': 0.0},
             'post_process_vad': {'discarded_count': 0, 'discarded_duration': 0.0},
             'asr': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'speaking_rate_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'silence_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'alignment_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
             'metrics_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
+            'text_quality_filter': {'discarded_count': 0, 'discarded_duration': 0.0},
         },
         'final': {'count': 0, 'duration': 0.0}
     }
@@ -90,7 +103,7 @@ def main_process(manifest_entry, output_folder, report_path):
     if file_is_too_large(audio_path, logger):
         return None, []
 
-    if not audio_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4")):
+    if not audio_path.endswith((".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4", ".ogg", ".webm")):
         logger.warning(f"Unsupported file type: {audio_path}")
         return None, []
 
@@ -166,7 +179,7 @@ def main_process(manifest_entry, output_folder, report_path):
 
     logger.info("Step 4: Post-process VAD")
     audio_dur = len(audio["waveform"]) / audio["sample_rate"]
-    segment_list = cut_by_speaker_label(vad_list_refined, audio_dur, processing_stats, cfg.get("strategy_parameters", {}))
+    segment_list = cut_by_speaker_label(vad_list_refined, audio_dur, processing_stats, cfg.get("strategy_parameters", {}), audio=audio)
 
     # ----------------------------------------------------------------------
     # Step 5: ASR
@@ -181,6 +194,76 @@ def main_process(manifest_entry, output_folder, report_path):
         with open(final_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         return final_path, []
+
+    # ----------------------------------------------------------------------
+    # Step 5.5: Domain Annotation (text / acoustic / speaker)
+    # ----------------------------------------------------------------------
+    if cfg.get("domain_annotation", {}).get("enable", False):
+        logger.info("Step 5.5: Domain Annotation")
+        try:
+            asr_result = annotate_domains(audio, asr_result, cfg["domain_annotation"])
+        except Exception as e:
+            logger.warning(f"Domain annotation failed: {e}")
+
+    # ----------------------------------------------------------------------
+    # Step 5.7: Speaking Rate (per-segment) Scoring & Filter
+    # ----------------------------------------------------------------------
+    if cfg.get("speaking_rate", {}).get("enable", False):
+        logger.info("Step 5.7: Speaking Rate Scoring & Filter")
+        try:
+            asr_result = analyze_speaking_rate(audio, asr_result, cfg["speaking_rate"])
+            before_sr = list(asr_result)
+            asr_result = filter_by_speaking_rate(asr_result, cfg["speaking_rate"])
+            update_stats(processing_stats, 'speaking_rate_filter', before_sr, asr_result)
+        except Exception as e:
+            logger.warning(f"Speaking rate analysis failed: {e}")
+
+        if not asr_result:
+            logger.warning(f"All segments filtered out by speaking_rate for {fid}")
+            final_path = os.path.join(save_path, f"{fid}.json")
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            return final_path, []
+
+    # ----------------------------------------------------------------------
+    # Step 5.75: Abnormal Silence Detection & Filter
+    # ----------------------------------------------------------------------
+    if cfg.get("silence_filter", {}).get("enable", False):
+        logger.info("Step 5.75: Abnormal Silence Detection & Filter")
+        try:
+            asr_result = detect_abnormal_silence(audio, asr_result, cfg["silence_filter"])
+            before_silence = list(asr_result)
+            asr_result = filter_by_abnormal_silence(asr_result, cfg["silence_filter"])
+            update_stats(processing_stats, 'silence_filter', before_silence, asr_result)
+        except Exception as e:
+            logger.warning(f"Abnormal silence detection failed: {e}")
+
+        if not asr_result:
+            logger.warning(f"All segments filtered out by abnormal_silence for {fid}")
+            final_path = os.path.join(save_path, f"{fid}.json")
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            return final_path, []
+
+    # ----------------------------------------------------------------------
+    # Step 5.8: Audio-Text Alignment (forced alignment via WhisperX)
+    # ----------------------------------------------------------------------
+    if cfg.get("alignment", {}).get("enable", False):
+        logger.info("Step 5.8: Audio-Text Alignment Scoring & Filter")
+        try:
+            asr_result = compute_alignment_score(audio, asr_result, cfg["alignment"])
+            before_align = list(asr_result)
+            asr_result = filter_by_alignment(asr_result, cfg["alignment"])
+            update_stats(processing_stats, 'alignment_filter', before_align, asr_result)
+        except Exception as e:
+            logger.warning(f"Alignment scoring failed: {e}")
+
+        if not asr_result:
+            logger.warning(f"All segments filtered out by alignment for {fid}")
+            final_path = os.path.join(save_path, f"{fid}.json")
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            return final_path, []
 
     # ----------------------------------------------------------------------
     # Step 6: Filter
@@ -198,6 +281,23 @@ def main_process(manifest_entry, output_folder, report_path):
         with open(final_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         return final_path, []
+
+    # ----------------------------------------------------------------------
+    # Step 6.5: Text Quality Scoring & Filter
+    # ----------------------------------------------------------------------
+    if cfg.get("text_quality", {}).get("enable", False):
+        logger.info("Step 6.5: Text Quality Scoring & Filter")
+        before_text_quality = list(filtered_list)
+        filtered_list = text_quality_prediction(filtered_list, cfg["text_quality"])
+        filtered_list = filter_by_text_quality(filtered_list, cfg["text_quality"])
+        update_stats(processing_stats, 'text_quality_filter', before_text_quality, filtered_list)
+
+        if not filtered_list:
+            logger.warning(f"All segments filtered out by text quality for {fid}")
+            final_path = os.path.join(save_path, f"{fid}.json")
+            with open(final_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=2)
+            return final_path, []
 
     # ----------------------------------------------------------------------
     # Step 7: Export

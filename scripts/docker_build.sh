@@ -9,7 +9,7 @@ version=$(date "+%Y%m%d%H%M%S")
 version=audio_preprocess_${version}
 echo ${version}
 
-#docker login --username=leolxliu https://csighub.tencentyun.com --password=leolxliu
+docker login --username=allenxzhang https://csighub.tencentyun.com --password=allenxzhang
 
-docker build --network=host -f scripts/dockerfile -t csighub.tencentyun.com/avchat/audio_preprocess:${version} ./
+docker build --network=host --no-cache -f scripts/dockerfile -t csighub.tencentyun.com/avchat/audio_preprocess:${version} ./
 docker push csighub.tencentyun.com/avchat/audio_preprocess:${version}

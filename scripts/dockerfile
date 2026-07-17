@@ -1,33 +1,83 @@
-FROM rayproject/ray:2.48.0.2c63f6-py39-cpu
+# Base images 基础镜像
+FROM mirrors.tencent.com/todacc/venus-std-base-cuda12.1:0.2.8
 USER root
 
-RUN apt-get update
-RUN apt-get update && apt-get install -y \
-    vim \
-    net-tools \
-    lrzsz \
-    sox \
-    libsox-dev \
-    build-essential \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+#MAINTAINER 维护者信息
+LABEL MAINTAINER="allenxzhang"
 
-RUN conda create -y -n AudioPipeline python=3.9 && \
-    conda install -n AudioPipeline -y -c conda-forge \
-    ffmpeg \
-    hdbscan
-    
+RUN yum install -y vim net-tools lrzsz sox sox-devel
+# Java 17+ is required by language-tool-python's LanguageTool 6.8+
+# (used by text_quality.spell_score). Without it spell scoring silently
+# degrades to -1.
+RUN yum install -y java-17-openjdk java-17-openjdk-devel
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+
+# Install miniforge
+RUN wget --quiet https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /root/miniforge.sh && \
+    /bin/bash /root/miniforge.sh -b -p /opt/conda && \
+    rm /root/miniforge.sh && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo "source /opt/conda/etc/profile.d/conda.sh" >> /root/.bashrc
+
+# 设置conda到PATH环境变量
+ENV PATH="/opt/conda/bin:$PATH"
+
+
+RUN echo "Prepare ENV"
+RUN conda create -y -n AudioPipeline python=3.9.21 pip
+RUN conda install -n AudioPipeline ffmpeg -y
 RUN conda install -n AudioPipeline pytorch=2.5.0 torchvision=0.20.0 torchaudio=2.5.0 pytorch-cuda=12.1 -c pytorch -c nvidia -y
 
-RUN mkdir -p /home/oicq/audio_preprocess
-RUN pwd
-COPY . /home/oicq/audio_preprocess
-WORKDIR  /home/oicq/audio_preprocess
+
+RUN yum install -y git
+RUN mkdir -p /home/oicq
+WORKDIR /home/oicq
+
+# Cache bust: change this value before each build to force re-clone of
+# the git repo. Without this, BuildKit will reuse the cached `git clone`
+# layer even with `docker build --no-cache`, and the image ends up
+# pinned to a stale commit. Bump the date string every time you build.
+ARG CACHEBUST=20260605
+RUN git clone -b allenxzhang https://private:H73arudJEAnEEUDU-Pl3@git.woa.com/ConversationalAI/audio-preprocess.git
+RUN cp -r /home/oicq/audio-preprocess /home/oicq/audio_preprocess
+# COPY . /home/oicq/audio_preprocess
+WORKDIR /home/oicq/audio_preprocess
 
 RUN echo "source activate AudioPipeline" >> ~/.bashrc
-RUN conda run -n AudioPipeline pip install -r requirements.txt
-RUN conda run -n AudioPipeline pip install onnxruntime-gpu==1.19.2
-RUN conda run -n AudioPipeline python main.py --prepare_env 1
+RUN conda run -n AudioPipeline python -m pip install ray==2.48.0
+RUN conda run -n AudioPipeline python -m pip install -r requirements.txt
+RUN conda run -n AudioPipeline python -m pip install onnxruntime-gpu==1.19.2
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_russian.json
+# Pre-download ASR models needed by other languages' validation_asr_provider:
+#   - paraformer (used by zh validation)
+#   - whisper    (used by en validation)
+# funasr_nano + all common models (pyannote, SMRU, WhisperX, DNSMOS/Brouhaha,
+# ERes2Net, silero-vad) are already cached by the russian config above, so
+# each subsequent run only fetches the new ASR backend.
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_zh.json
+RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_en.json
+# Pre-download Qwen3-0.6B for PPL scoring (text_quality.ppl). Worker nodes
+# have no outbound network, so this must be cached at build time.
+RUN conda run -n AudioPipeline python scripts/download_qwen3_06b.py
+# Pre-download WhisperX wav2vec2 alignment models for all 7 supported
+# languages (~7-8 GB total). Without this, alignment_score is -1
+# everywhere because workers can't reach HuggingFace.
+RUN conda run -n AudioPipeline python scripts/download_whisperx_align.py
+# Convert pytorch_model.bin → model.safetensors so transformers loads
+# them on torch 2.5 (CVE-2025-32434 blocks .bin loading otherwise).
+RUN conda run -n AudioPipeline python scripts/convert_bin_to_safetensors.py \
+    --hub-dir /root/.cache/huggingface/hub --filter wav2vec2
 
-# ENTRYPOINT ["/bin/bash"]
-ENTRYPOINT ["./scripts/start_ray.sh", "auto"]
+# Set proxy environment variables
+ENV ENV_STAR_PROXY="http://star-proxy.oa.com:3128"
+ENV NO_PROXY=".woa.com,mirrors.cloud.tencent.com,tlinux-mirror.tencent-cloud.com,tlinux-mirrorlist.tencent-cloud.com,localhost,127.0.0.1,mirrors-tlinux.tencentyun.com,.oa.com,.local,.3gqq.com,.7700.org,.ad.com,.ada_sixjoy.com,.addev.com,.app.local,.apps.local,.aurora.com,.autotest123.com,.bocaiwawa.com,.boss.com,.cdc.com,.cdn.com,.cds.com,.cf.com,.cjgc.local,.cm.com,.code.com,.datamine.com,.dvas.com,.dyndns.tv,.ecc.com,.expochart.cn,.expovideo.cn,.fms.com,.great.com,.hadoop.sec,.heme.com,.home.com,.hotbar.com,.ibg.com,.ied.com,.ieg.local,.ierd.com,.imd.com,.imoss.com,.isd.com,.isoso.com,.itil.com,.kao5.com,.kf.com,.kitty.com,.lpptp.com,.m.com,.matrix.cloud,.matrix.net,.mickey.com,.mig.local,.mqq.com,.oiweb.com,.okbuy.isddev.com,.oss.com,.otaworld.com,.paipaioa.com,.qqbrowser.local,.qqinternal.com,.qqwork.com,.rtpre.com,.sc.oa.com,.sec.com,.server.com,.service.com,.sjkxinternal.com,.sllwrnm5.cn,.sng.local,.soc.com,.t.km,.tcna.com,.teg.local,.tencentvoip.com,.tenpayoa.com,.test.air.tenpay.com,.tr.com,.tr_autotest123.com,.vpn.com,.wb.local,.webdev.com,.webdev2.com,.wizard.com,.wqq.com,.wsd.com,.sng.com,.music.lan,.mnet2.com,.tencentb2.com,.tmeoa.com,.pcg.com,www.wip3.adobe.com,www-mm.wip3.adobe.com,mirrors.tencent.com,csighub.tencentyun.com"
+ENV HTTP_PROXY=$ENV_STAR_PROXY
+ENV HTTPS_PROXY=$ENV_STAR_PROXY
+ENV no_proxy=$NO_PROXY
+ENV http_proxy=$ENV_STAR_PROXY
+ENV https_proxy=$ENV_STAR_PROXY
+
+# 新增这行 CMD 命令，确保容器常驻不退出
+# CMD ["tail", "-f", "/dev/null"]

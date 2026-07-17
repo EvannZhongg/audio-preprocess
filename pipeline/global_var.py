@@ -4,6 +4,49 @@ import uuid
 
 import torch
 import yaml
+
+# ----------------------------------------------------------------------
+# Compatibility shim: pyannote.audio<=3.3.x references several
+# torchaudio top-level symbols that newer torchaudio (>=2.2 / >=2.5)
+# either moved or removed:
+#   - torchaudio.AudioMetaData       (moved to torchaudio.io)
+#   - torchaudio.list_audio_backends (deprecated/relocated)
+#   - torchaudio.get_audio_backend / set_audio_backend (deprecated)
+# Without this patch, importing pyannote raises one of:
+#   AttributeError: module 'torchaudio' has no attribute 'AudioMetaData'
+#   AttributeError: module 'torchaudio' has no attribute 'list_audio_backends'
+# Restore each missing symbol to its old location BEFORE pyannote loads.
+# ----------------------------------------------------------------------
+import torchaudio as _ta
+
+# 1. AudioMetaData
+if not hasattr(_ta, "AudioMetaData"):
+    try:
+        from torchaudio.io import AudioMetaData as _AMD
+        _ta.AudioMetaData = _AMD
+    except Exception:
+        class _AMD:
+            pass
+        _ta.AudioMetaData = _AMD
+
+# 2. list_audio_backends — pyannote calls this to verify a backend is
+# present; we statically declare the backends our env provides
+# (soundfile is in requirements.txt; sox via libsox-dev in dockerfile).
+if not hasattr(_ta, "list_audio_backends"):
+    def _list_audio_backends():
+        # Stub returning the backends that are realistically available.
+        # pyannote only checks for membership ("soundfile" in backends),
+        # so an explicit list is safe.
+        return ["soundfile", "sox_io", "sox"]
+    _ta.list_audio_backends = _list_audio_backends
+
+# 3. get_audio_backend / set_audio_backend — older pyannote versions
+# may probe these; provide harmless no-ops.
+if not hasattr(_ta, "get_audio_backend"):
+    _ta.get_audio_backend = lambda: "soundfile"
+if not hasattr(_ta, "set_audio_backend"):
+    _ta.set_audio_backend = lambda *a, **k: None
+
 from pyannote.audio import Pipeline
 
 from models import (brouhaha_metrics, dnsmos, funasr_asr, separate_fast,
@@ -15,6 +58,11 @@ from utils.tool import detect_gpu
 
 try:
     import models.gemini_asr as gemini_asr  # 假设路径是这样，根据实际情况修改
+except ImportError:
+    pass
+
+try:
+    import models.qwen3_asr as qwen3_asr
 except ImportError:
     pass
 
@@ -51,6 +99,17 @@ class PipelineParam:
     refinement_model = None
     refinement_feature_extractor = None
 
+    # text quality
+    ppl_scorer = None
+    spell_checker = None
+    llm_text_scorer = None
+
+    # domain annotation
+    domain_classifier = None
+
+    # forced alignment (whisperx)
+    aligner = None
+
 
 
 def load_asr_model(cfg, asr_provider, device_name, cli_args):
@@ -81,6 +140,34 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             funasr_vad_model_dir = funasr_vad_model
 
         asr_model = funasr_asr.load_asr_model(asr_model="SenseVoice", model_dir=funasr_model_dir, vad_model_dir=funasr_vad_model_dir, device=device_name)
+
+    elif asr_provider == "funasr_nano":
+        if "funasr_nano" not in cfg:
+            raise ValueError("FunASR Nano configuration not found in config.json")
+
+        nano_model = cfg["funasr_nano"].get("model", "FunAudioLLM/Fun-ASR-MLT-Nano-2512")
+        nano_vad_model = cfg["funasr_nano"].get("vad_model", "fsmn-vad")
+        nano_model_dir_cache = cfg["funasr_nano"].get("model_dir_cache", "")
+        nano_vad_model_dir_cache = cfg["funasr_nano"].get("vad_model_dir_cache", "")
+        nano_batch_size = cfg["funasr_nano"].get("batch_size", 16)
+
+        if nano_model_dir_cache and os.path.exists(nano_model_dir_cache):
+            nano_model_dir = nano_model_dir_cache
+        else:
+            nano_model_dir = nano_model
+
+        if nano_vad_model_dir_cache and os.path.exists(nano_vad_model_dir_cache):
+            nano_vad_model_dir = nano_vad_model_dir_cache
+        else:
+            nano_vad_model_dir = nano_vad_model
+
+        asr_model = funasr_asr.load_asr_model(
+            asr_model="FunASRNano",
+            model_dir=nano_model_dir,
+            vad_model_dir=nano_vad_model_dir,
+            device=device_name,
+            batch_size=nano_batch_size
+        )
 
     elif asr_provider == "paraformer":
         if "paraformer" not in cfg:
@@ -113,16 +200,35 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
     elif asr_provider == "whisper":
         if "whisper" not in cfg:
             raise ValueError("whisper configuration not found in config.json")
-        model_path = cfg["whisper"].get("model", "openai/whisper-large-v3-turbo")
-        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f")
+        model_path = cfg["whisper"].get("model", "Systran/faster-distil-whisper-large-v3")
+        model_dir_cache = cfg["whisper"].get("model_dir_cache", "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab")
         if model_dir_cache and os.path.exists(model_dir_cache):
             model_path = model_dir_cache
         else:
             model_path = model_path
+        whisper_compute_type = cfg["whisper"].get("compute_type", "float16")
+        if device_name == "cpu" and whisper_compute_type != "float32":
+            whisper_compute_type = "float32"
+        whisper_batch_size = cfg["whisper"].get("batch_size", 8)
+        PipelineParam.batch_size = whisper_batch_size
         asr_model = whisper_asr.load_asr_model(
-            model_path = model_path,  device=device_name, threads=cli_args.threads, 
+            model_path = model_path,  device=device_name, threads=cli_args.threads,
+            compute_type=whisper_compute_type,
             asr_options={"initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."}
         )
+
+    elif asr_provider == "qwen3_asr":
+        if "qwen3_asr" not in cfg:
+            raise ValueError("qwen3_asr configuration not found in config.json")
+        qwen3_cfg = cfg["qwen3_asr"]
+        asr_model = qwen3_asr.load_asr_model(
+            namespace=qwen3_cfg.get("namespace", "Production"),
+            service=qwen3_cfg.get("service", "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService"),
+            model_name=qwen3_cfg.get("model_name", "Qwen/Qwen3-ASR-1.7B"),
+            device=device_name,
+            hot_words=qwen3_cfg.get("hot_words", ""),
+        )
+
     else:
         raise ValueError(f"Unknown ASR provider: {asr_provider}")
     return asr_model
@@ -291,6 +397,99 @@ def init_pipeline_global(config, cli_args):
     multilingual_flag = cfg["language"]["multilingual"]
     PipelineParam.supported_languages = supported_languages
     PipelineParam.multilingual_flag = multilingual_flag
-    
+
+    # Text Quality Models
+    tq_cfg = cfg.get("text_quality", {})
+    if tq_cfg.get("enable", False):
+        logger.debug(" * Loading Text Quality Models")
+        try:
+            from models.text_quality import (PerplexityScorer, SpellChecker,
+                                             Qwen3OmniTextScorer)
+
+            ppl_cfg = tq_cfg.get("ppl", {})
+            if ppl_cfg.get("enable", False):
+                ppl_model = ppl_cfg.get("model", "Qwen/Qwen2.5-0.5B")
+                ppl_cache = ppl_cfg.get("model_dir_cache", "")
+                ppl_path = ppl_cache if ppl_cache and os.path.exists(ppl_cache) else ppl_model
+                try:
+                    PipelineParam.ppl_scorer = PerplexityScorer(model_path=ppl_path, device=device_name)
+                except Exception as e:
+                    logger.error(f"Failed to load PPL model: {e}")
+                    PipelineParam.ppl_scorer = None
+
+            spell_cfg = tq_cfg.get("spell", {})
+            if spell_cfg.get("enable", False):
+                try:
+                    PipelineParam.spell_checker = SpellChecker()
+                except Exception as e:
+                    logger.error(f"Failed to init SpellChecker: {e}")
+                    PipelineParam.spell_checker = None
+
+            llm_cfg = tq_cfg.get("llm", {})
+            if llm_cfg.get("enable", False):
+                try:
+                    PipelineParam.llm_text_scorer = Qwen3OmniTextScorer(
+                        api_url=llm_cfg.get("api_url", ""),
+                        api_token=llm_cfg.get("api_token", ""),
+                        model_id=llm_cfg.get("model_id", ""),
+                        timeout=llm_cfg.get("timeout", 30),
+                        concurrency=llm_cfg.get("concurrency", 16),
+                        max_retries=llm_cfg.get("max_retries", 2),
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to init Qwen3OmniTextScorer: {e}")
+                    PipelineParam.llm_text_scorer = None
+        except ImportError as e:
+            logger.error(f"Failed to import text quality models: {e}. Disabling text quality.")
+
+    # Domain Classifier
+    da_cfg = cfg.get("domain_annotation", {})
+    if da_cfg.get("enable", False):
+        logger.debug(" * Loading Domain Classifier")
+        try:
+            from models.domain_classifier import Qwen3OmniDomainClassifier
+            from utils.domain_enums import (resolve_acoustic_enums,
+                                            resolve_speaker_enums,
+                                            resolve_text_enums)
+
+            llm_cfg = da_cfg.get("llm", {})
+            text_enums = resolve_text_enums(da_cfg.get("text_domain", {}))
+            acoustic_enums = resolve_acoustic_enums(da_cfg.get("acoustic_domain", {}))
+            speaker_enums = resolve_speaker_enums(da_cfg.get("speaker_domain", {}))
+            try:
+                PipelineParam.domain_classifier = Qwen3OmniDomainClassifier(
+                    api_url=llm_cfg.get("api_url", ""),
+                    api_token=llm_cfg.get("api_token", ""),
+                    model_id=llm_cfg.get("model_id", ""),
+                    text_enums=text_enums,
+                    acoustic_enums=acoustic_enums,
+                    speaker_enums=speaker_enums,
+                    timeout=llm_cfg.get("timeout", 60),
+                    max_retries=llm_cfg.get("max_retries", 2),
+                )
+            except Exception as e:
+                logger.error(f"Failed to init Qwen3OmniDomainClassifier: {e}")
+                PipelineParam.domain_classifier = None
+        except ImportError as e:
+            logger.error(f"Failed to import domain classifier: {e}. Disabling domain annotation.")
+
+    # Forced Alignment (WhisperX)
+    al_cfg = cfg.get("alignment", {})
+    if al_cfg.get("enable", False):
+        logger.debug(" * Loading WhisperX Aligner")
+        try:
+            from models.alignment import WhisperXAligner
+            try:
+                PipelineParam.aligner = WhisperXAligner(
+                    device=device_name,
+                    model_dir=al_cfg.get("model_dir_cache"),
+                    language_models=al_cfg.get("language_models", {}),
+                )
+            except Exception as e:
+                logger.error(f"Failed to init WhisperXAligner: {e}")
+                PipelineParam.aligner = None
+        except ImportError as e:
+            logger.error(f"Failed to import WhisperXAligner: {e}. Disabling alignment.")
+
     torch.set_num_threads(g_args.threads)
     logger.debug(f"Worker {worker_id} finished loading models.")

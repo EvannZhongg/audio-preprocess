@@ -46,6 +46,12 @@
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
         "model": "gemini-2.5-flash"
     },
+    "qwen3_asr": {
+        "namespace": "Production",
+        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "model_name": "Qwen/Qwen3-ASR-1.7B",
+        "hot_words": ""
+    },
     "embedding_refinement": {
         "enable": true,
         "eres2net_model_path": "ckpts/pretrained_eres2netv2.ckpt"
