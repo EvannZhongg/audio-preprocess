@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -38,6 +39,11 @@ class Standardizer:
     def __init__(self, params: StandardizationParams, device: str = "cpu") -> None:
         self.params = params
         self.vad_model = SileroVAD(device=torch.device(device))
+
+        # Silero 模型内部保存可变的递归状态。main_v3 当前为每个文件线程创建
+        # 独立 Standardizer，但其他入口仍可能共享实例，因此这里继续用锁
+        # 保护完整的 reset -> inference -> reset 操作，避免并发破坏状态。
+        self._vad_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # public entry
@@ -142,11 +148,38 @@ class Standardizer:
         else:
             wav16 = waveform
 
-        try:
-            intervals = self.vad_model._get_speech_timestamps_wrapper(wav16, _SILERO_SR)
-        except Exception as e:
-            logger.error(f"std_split_silero_failed {e}", extra=log_tag)
-            return None
+        intervals = None
+        for attempt in range(2):
+            try:
+                with self._vad_lock:
+                    # The JIT Silero model stores recurrent h/c state on the
+                    # model object. Reset it explicitly so a failed/aborted
+                    # previous call cannot leak a malformed state into this
+                    # long-file split.
+                    #
+                    # 实际遇到过 `_state` 退化为 [1, 64]，而 decoder 需要同时
+                    # 访问 state[0]/state[1] 的错误。显式 reset 用于清理前一
+                    # 个长文件或异常中断后残留的 LSTM 状态。
+                    self._reset_silero_state()
+                    intervals = self.vad_model._get_speech_timestamps_wrapper(
+                        wav16, _SILERO_SR
+                    )
+                    self._reset_silero_state()
+                break
+            except Exception as e:
+                with self._vad_lock:
+                    self._reset_silero_state()
+                if attempt == 0:
+                    # 仅异常时重试一次，正常路径没有额外推理开销。第一次
+                    # 失败可能只是模型状态污染；reset 后重试可以避免直接
+                    # 丢弃整个超长音频。
+                    logger.warning(
+                        f"std_split_silero_retry {type(e).__name__}: {e}",
+                        extra=log_tag,
+                    )
+                    continue
+                logger.error(f"std_split_silero_failed {e}", extra=log_tag)
+                return None
         if not intervals:
             return None
 
@@ -193,6 +226,21 @@ class Standardizer:
         if not chunks:
             return None
         return chunks
+
+    def _reset_silero_state(self) -> None:
+        """Best-effort reset for stateful TorchScript/ONNX Silero models."""
+
+        model = getattr(self.vad_model, "vad_model", None)
+        reset_states = getattr(model, "reset_states", None)
+        if callable(reset_states):
+            try:
+                reset_states()
+            except Exception:
+                # The following inference/retry will provide the actionable
+                # error; state cleanup itself must not mask it.
+                # reset 是 best-effort 辅助操作，不能让 reset 自身的异常覆盖
+                # 真正的 Silero inference 错误。
+                pass
 
     # ------------------------------------------------------------------
     # helpers

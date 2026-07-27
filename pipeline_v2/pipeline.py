@@ -80,8 +80,13 @@ class PipelineV2:
     # ------------------------------------------------------------------
     # Stages: PipelineState -> PipelineState
     # ------------------------------------------------------------------
-    def standardize(self, state: PipelineState) -> list[PipelineState]:
-        results = self.standardizer.run(state.audio_path, log_tag=state.log_tag)
+    def standardize(
+        self,
+        state: PipelineState,
+        standardizer: Optional[Standardizer] = None,
+    ) -> list[PipelineState]:
+        runner = standardizer if standardizer is not None else self.standardizer
+        results = runner.run(state.audio_path, log_tag=state.log_tag)
         if not results:
             raise PipelineError("standardize", "no chunks")
         states: list[PipelineState] = []
