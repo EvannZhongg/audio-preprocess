@@ -152,27 +152,26 @@ class Standardizer:
         for attempt in range(2):
             try:
                 with self._vad_lock:
-                    # The JIT Silero model stores recurrent h/c state on the
-                    # model object. Reset it explicitly so a failed/aborted
+                    # The JIT/ONNX Silero model stores recurrent h/c state on
+                    # the model object. Reset it before use so a failed/aborted
                     # previous call cannot leak a malformed state into this
-                    # long-file split.
+                    # long-file split. Resetting before every call also makes a
+                    # post-inference reset unnecessary — the next file (the only
+                    # other caller is this method) always cleans up first.
                     #
                     # 实际遇到过 `_state` 退化为 [1, 64]，而 decoder 需要同时
-                    # 访问 state[0]/state[1] 的错误。显式 reset 用于清理前一
+                    # 访问 state[0]/state[1] 的错误。用之前 reset 即可清理前一
                     # 个长文件或异常中断后残留的 LSTM 状态。
                     self._reset_silero_state()
                     intervals = self.vad_model._get_speech_timestamps_wrapper(
                         wav16, _SILERO_SR
                     )
-                    self._reset_silero_state()
                 break
             except Exception as e:
-                with self._vad_lock:
-                    self._reset_silero_state()
                 if attempt == 0:
-                    # 仅异常时重试一次，正常路径没有额外推理开销。第一次
-                    # 失败可能只是模型状态污染；reset 后重试可以避免直接
-                    # 丢弃整个超长音频。
+                    # 仅异常时重试一次，正常路径没有额外推理开销。第一次失败
+                    # 可能只是模型状态污染；下一轮的 reset-before 会清理它，
+                    # 重试可以避免直接丢弃整个超长音频。
                     logger.warning(
                         f"std_split_silero_retry {type(e).__name__}: {e}",
                         extra=log_tag,
