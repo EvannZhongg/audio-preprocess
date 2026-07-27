@@ -265,17 +265,13 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
             segment_count += len(state.segment_list or [])
 
         return (task.relative_path, segment_count, "")
-    except PipelineError as exc:
-        logger.error(
-            f"pipeline_failed stage {exc.stage} msg {exc.message}",
-            extra=bootstrap.log_tag,
-        )
-        return (task.relative_path, 0, f"{type(exc).__name__}: {exc}")
     except Exception as exc:
-        logger.error(
-            f"pipeline_failed unexpected {type(exc).__name__} {exc}",
-            extra=bootstrap.log_tag,
+        detail = (
+            f"stage {exc.stage} msg {exc.message}"
+            if isinstance(exc, PipelineError)
+            else f"unexpected {type(exc).__name__} {exc}"
         )
+        logger.error(f"pipeline_failed {detail}", extra=bootstrap.log_tag)
         return (task.relative_path, 0, f"{type(exc).__name__}: {exc}")
 
 
