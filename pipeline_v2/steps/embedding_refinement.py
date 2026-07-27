@@ -33,7 +33,6 @@ _MIN_SEGMENT_DURATION_S = 1.0
 _WINDOW_SIZE_S = 1.1
 _WINDOW_STEP_S = 0.4
 _MIN_WAVEFORM_S = 0.1
-_REF_BATCH_SIZE = 8
 
 
 class EmbeddingRefiner:
@@ -103,7 +102,7 @@ class EmbeddingRefiner:
 
             if cand:
                 ref_waves = [c[1] for c in cand]
-                ref_embs = self._embed_batched(ref_waves, sample_rate, batch=_REF_BATCH_SIZE)
+                ref_embs = self._embed_batched(ref_waves, sample_rate, batch=1)
 
                 win_counts = [len(c[2]) for c in cand]
                 flat_windows: list[np.ndarray] = [w for c in cand for w in c[2]]
