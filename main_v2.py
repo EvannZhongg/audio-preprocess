@@ -8,12 +8,12 @@ the same time, while CPU decode/standardize and export still overlap across
 processes.
 
 Usage:
-    python main_v3.py --config <config.json> \
+    python main_2.py --config <config.json> \
                       --input <audio_or_folder> \
                       --output <output_folder> \
                       [--num-workers N]
 
-    python main_v3.py --config <config.json> \
+    python main_v2.py --config <config.json> \
                       --manifest <manifest.parquet_or_shard_dir> \
                       --audio-root <audio_root> \
                       --output <output_folder> \
@@ -72,7 +72,6 @@ class FileItem:
 
     audio_path: str
     relative_path: str
-    duration: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -193,7 +192,6 @@ def collect_manifest_groups(
                 FileItem(
                     audio_path=os.path.join(audio_root, relative_path),
                     relative_path=relative_path,
-                    duration=duration or 0.0,
                 )
             )
             kept += 1
@@ -203,7 +201,7 @@ def collect_manifest_groups(
 
     if min_duration > 0:
         logger.info(
-            f"main_v3_min_duration_filter min {min_duration}s "
+            f"main_v2_min_duration_filter min {min_duration}s "
             f"kept {kept} skipped {skipped}"
         )
     return groups
@@ -278,10 +276,10 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
 def _log_result(result: tuple[str, int, str]) -> None:
     relative_path, segment_count, error = result
     if error:
-        logger.error(f"main_v3_failed file {relative_path} err {error}")
+        logger.error(f"main_v2_failed file {relative_path} err {error}")
     else:
         logger.info(
-            f"main_v3_done file {relative_path} segments {segment_count}"
+            f"main_v2_done file {relative_path} segments {segment_count}"
         )
 
 
@@ -343,7 +341,7 @@ def main() -> None:
         )
 
     logger.info(
-        f"main_v3 files {total} workers {num_workers} gpu_lock serialized "
+        f"main_v2 files {total} workers {num_workers} gpu_lock serialized "
         f"output {args.output} mode {'manifest' if manifest_mode else 'input'} "
         f"pipeline_version v2 "
         f"allocator_conf {os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')}"
@@ -355,7 +353,7 @@ def main() -> None:
         _init_worker(args.config, nullcontext())
         for shard_name, items in groups:
             tasks = _tasks_for_group(shard_name, items, args.output, manifest_mode)
-            for task in tqdm.tqdm(tasks, desc=f"pipeline_v3:{shard_name}"):
+            for task in tqdm.tqdm(tasks, desc=f"pipeline_v2:{shard_name}"):
                 _log_result(_process_one(task))
         return
 
@@ -373,7 +371,7 @@ def main() -> None:
             for result in tqdm.tqdm(
                 pool.imap_unordered(_process_one, tasks, chunksize=1),
                 total=len(tasks),
-                desc=f"pipeline_v3:{shard_name}",
+                desc=f"pipeline_v2:{shard_name}",
             ):
                 _log_result(result)
 
