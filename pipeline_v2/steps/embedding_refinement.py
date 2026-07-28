@@ -70,14 +70,12 @@ class EmbeddingRefiner:
         try:
             refined: list[Segment] = []
             n_short = n_no_ref = n_no_window = n_dropped = 0
-            n_too_long = 0  # [MAX_SEG_SKIP] 计数被跳过的超长片段，调试用，可整行删除
             default_sim = self.params.inter_similarity_threshold
 
             cand: list[tuple[Segment, np.ndarray, list[np.ndarray]]] = []
             for seg in vad_list:
                 duration = seg.end - seg.start
                 if duration > _MAX_SEGMENT_DURATION_S:
-                    n_too_long += 1  # [MAX_SEG_SKIP] 调试用，可整行删除
                     continue
                 if duration < _MIN_SEGMENT_DURATION_S:
                     seg.min_similarity = default_sim
@@ -133,6 +131,7 @@ class EmbeddingRefiner:
             return None
 
         total_ms = int((time.perf_counter() - t_total) * 1000)
+
         logger.info(
             f"emb_time_cost in {len(vad_list)} out {len(refined)} "
             f"short {n_short} no_ref {n_no_ref} no_window {n_no_window} "
