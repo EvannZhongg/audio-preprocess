@@ -30,10 +30,11 @@ from pipeline_v2.state import Segment
 
 _FEAT_SR = 16000
 _MIN_SEGMENT_DURATION_S = 1.0
+_MAX_SEGMENT_DURATION_S = 30
 _WINDOW_SIZE_S = 1.1
 _WINDOW_STEP_S = 0.4
 _MIN_WAVEFORM_S = 0.1
-_REF_BATCH_SIZE = 4
+_REF_BATCH_SIZE = 8
 
 
 class EmbeddingRefiner:
@@ -69,11 +70,15 @@ class EmbeddingRefiner:
         try:
             refined: list[Segment] = []
             n_short = n_no_ref = n_no_window = n_dropped = 0
+            n_too_long = 0  # [MAX_SEG_SKIP] 计数被跳过的超长片段，调试用，可整行删除
             default_sim = self.params.inter_similarity_threshold
 
             cand: list[tuple[Segment, np.ndarray, list[np.ndarray]]] = []
             for seg in vad_list:
                 duration = seg.end - seg.start
+                if duration > _MAX_SEGMENT_DURATION_S:
+                    n_too_long += 1  # [MAX_SEG_SKIP] 调试用，可整行删除
+                    continue
                 if duration < _MIN_SEGMENT_DURATION_S:
                     seg.min_similarity = default_sim
                     seg.reference_embedding = None
