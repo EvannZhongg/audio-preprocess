@@ -1,19 +1,21 @@
-"""Local PipelineV2 entrypoint for a single-GPU machine (multiprocessing).
+"""Local PipelineV2 entrypoint — TEST build with the GPU lock REMOVED.
 
-The processing implementation and exported ``pipeline_version`` remain V2.
+Same as main_v2.py but WITHOUT the cross-process GPU lock: every worker
+process runs its GPU stages concurrently on the same card. This is for
+测试 only — it lets two full PipelineV2 instances hit the embedding-refinement
+memory peak at the same time, so it is more likely to OOM than main_v2.py.
+Use it to measure真实并发吞吐 / 复现显存峰值,不建议作为生产入口。
+
 ``--num-workers`` controls the number of worker processes; each process owns
-its own PipelineV2 instance.  A cross-process GPU lock serializes the GPU
-stages so the two processes never hit the embedding-refinement memory peak at
-the same time, while CPU decode/standardize and export still overlap across
-processes.
+its own PipelineV2 instance.
 
 Usage:
-    python main_v3.py --config <config.json> \
+    python main_v4.py --config <config.json> \
                       --input <audio_or_folder> \
                       --output <output_folder> \
                       [--num-workers N]
 
-    python main_v3.py --config <config.json> \
+    python main_v4.py --config <config.json> \
                       --manifest <manifest.parquet_or_shard_dir> \
                       --audio-root <audio_root> \
                       --output <output_folder> \
@@ -47,7 +49,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ",".join(_cuda_alloc_options)
 import sys
 import time
 import warnings
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,17 +84,14 @@ class ProcessTask:
 
 
 # ---------------------------------------------------------------------------
-# 单 GPU 多进程调度状态
+# 单 GPU 多进程调度状态(测试版:无 GPU 锁)
 #
-# 1. 每个 worker 进程各自创建一份 _WORKER_PIPE(进程隔离,天然避免线程版
-#    的跨线程原生对象 SIGSEGV);单 GPU 上因此有 num_workers 份模型权重常驻;
-# 2. _GPU_LOCK 是跨进程锁,只在 GPU 阶段持有,保证任一时刻只有一个进程在
-#    冲 embedding refinement 的显存峰值,峰值约为 1x 而非 num_workers x;
-# 3. standardize(CPU decode/normalize)和 export(WAV/JSON 写盘)不加锁,
-#    可与另一个进程的 GPU 阶段重叠。
+# 每个 worker 进程各自创建一份 _WORKER_PIPE(进程隔离,天然避免线程版的跨
+# 线程原生对象 SIGSEGV);单 GPU 上因此有 num_workers 份模型权重常驻。
+# 与 main_v2 不同,这里没有跨进程 GPU 锁,多个进程会同时跑 GPU 阶段,更容易
+# 在 embedding refinement 处叠加显存峰值而 OOM——这正是本测试版要观察的。
 # ---------------------------------------------------------------------------
 _WORKER_PIPE: PipelineV2 | None = None
-_GPU_LOCK = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -199,23 +197,22 @@ def collect_manifest_groups(
 
     if min_duration > 0:
         logger.info(
-            f"main_v3_min_duration_filter min {min_duration}s "
+            f"main_v4_min_duration_filter min {min_duration}s "
             f"kept {kept} skipped {skipped}"
         )
     return groups
 
 
-def _init_worker(config_path: str, gpu_lock) -> None:
-    """Build this process's own PipelineV2 and record the shared GPU lock."""
+def _init_worker(config_path: str) -> None:
+    """Build this process's own PipelineV2."""
 
-    global _WORKER_PIPE, _GPU_LOCK
+    global _WORKER_PIPE
     params = PipelineParams.from_config(config_path)
     _WORKER_PIPE = PipelineV2(params)
-    _GPU_LOCK = gpu_lock
 
 
 def _process_one(task: ProcessTask) -> tuple[str, int, str]:
-    """Standardize/export in this process; run GPU stages under the shared lock."""
+    """Standardize/run-GPU/export in this process. No GPU lock (test build)."""
 
     assert _WORKER_PIPE is not None
     bootstrap = PipelineState(
@@ -229,8 +226,6 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
     )
 
     try:
-        # Decode/normalize is CPU-bound and holds no GPU lock, so it can overlap
-        # the other process's GPU inference.
         chunk_states = _WORKER_PIPE.standardize(bootstrap)
         segment_count = 0
 
@@ -238,24 +233,15 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
             t0 = time.perf_counter()
             is_last_chunk = chunk_index == len(chunk_states) - 1
 
-            # Serialize the GPU stages across processes: only one process runs
-            # separate/diarize/vad/refine/segment/metrics at a time, so the
-            # embedding-refinement memory peak stays ~1x rather than num_workers x.
-            with _GPU_LOCK:
-                state, vad_dur, refine_dur = _WORKER_PIPE.run_gpu_stages(state)
-                if torch.cuda.is_available():
-                    # Kernels run async; sync before releasing the lock so this
-                    # file's GPU work is truly done and its peak memory can be
-                    # freed before the other process acquires the lock.
-                    torch.cuda.synchronize()
-                    if is_last_chunk:
-                        # Per-file cleanup mirrors PipelineV2.run's finally; done
-                        # inside the lock so the freed memory is available to the
-                        # next process before it starts.
-                        torch.cuda.empty_cache()
+            # No GPU lock here: multiple processes may run these stages
+            # concurrently on the same card (the point of this test build).
+            state, vad_dur, refine_dur = _WORKER_PIPE.run_gpu_stages(state)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                if is_last_chunk:
+                    # Per-file cleanup mirrors PipelineV2.run's finally.
+                    torch.cuda.empty_cache()
 
-            # Export is CPU/IO-bound; run it outside the lock so it overlaps the
-            # next process's GPU work.
             state = _WORKER_PIPE.export(state, chunk_index, task.output_folder)
             PipelineV2.log_chunk_stats(state, t0, vad_dur, refine_dur)
             segment_count += len(state.segment_list or [])
@@ -274,10 +260,10 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
 def _log_result(result: tuple[str, int, str]) -> None:
     relative_path, segment_count, error = result
     if error:
-        logger.error(f"main_v3_failed file {relative_path} err {error}")
+        logger.error(f"main_v4_failed file {relative_path} err {error}")
     else:
         logger.info(
-            f"main_v3_done file {relative_path} segments {segment_count}"
+            f"main_v4_done file {relative_path} segments {segment_count}"
         )
 
 
@@ -328,48 +314,40 @@ def main() -> None:
     num_workers = max(1, min(args.num_workers, total))
 
     if num_workers > 1:
-        # 单卡多进程:每个进程各自加载一套完整 PipelineV2,显存占用随进程数
-        # 翻倍。GPU 锁只能防止两进程同时冲峰值,防不了 num_workers 份常驻权重
-        # 本身超预算。若 OOM,继续下调 refinement_batch_size 或退回 1 个进程。
+        # 测试版:无 GPU 锁,多进程会同时跑 GPU 阶段,显存峰值可能叠加。
         logger.warning(
-            f"single-GPU multiprocessing: {num_workers} processes each load a "
-            f"full PipelineV2; GPU memory scales with workers. GPU stages are "
-            f"serialized by a cross-process lock, but if OOM occurs lower "
-            f"refinement_batch_size or use --num-workers 1"
+            f"TEST build (no GPU lock): {num_workers} processes each load a "
+            f"full PipelineV2 and run GPU stages CONCURRENTLY on one card; "
+            f"embedding-refinement peaks can stack and OOM. Lower "
+            f"refinement_batch_size or use --num-workers 1 if it OOMs"
         )
 
     logger.info(
-        f"main_v3 files {total} workers {num_workers} gpu_lock serialized "
+        f"main_v4 files {total} workers {num_workers} gpu_lock none "
         f"output {args.output} mode {'manifest' if manifest_mode else 'input'} "
         f"pipeline_version v2 "
         f"allocator_conf {os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')}"
     )
 
     if num_workers == 1:
-        # Single process: no cross-process contention, so a no-op lock keeps
-        # _process_one's code path identical to the multi-process one.
-        _init_worker(args.config, nullcontext())
+        _init_worker(args.config)
         for shard_name, items in groups:
             tasks = _tasks_for_group(shard_name, items, args.output, manifest_mode)
-            for task in tqdm.tqdm(tasks, desc=f"pipeline_v3:{shard_name}"):
+            for task in tqdm.tqdm(tasks, desc=f"pipeline_v4:{shard_name}"):
                 _log_result(_process_one(task))
         return
 
-    # Manager().Lock() yields a picklable proxy that survives spawn+initargs;
-    # a raw mp.Lock() is not reliably passable through Pool initargs under spawn.
-    manager = mp.Manager()
-    gpu_lock = manager.Lock()
     with mp.Pool(
         processes=num_workers,
         initializer=_init_worker,
-        initargs=(args.config, gpu_lock),
+        initargs=(args.config,),
     ) as pool:
         for shard_name, items in groups:
             tasks = _tasks_for_group(shard_name, items, args.output, manifest_mode)
             for result in tqdm.tqdm(
                 pool.imap_unordered(_process_one, tasks, chunksize=1),
                 total=len(tasks),
-                desc=f"pipeline_v3:{shard_name}",
+                desc=f"pipeline_v4:{shard_name}",
             ):
                 _log_result(result)
 
