@@ -1,27 +1,3 @@
-"""Local PipelineV2 entrypoint — TEST build with the GPU lock REMOVED.
-
-Same as main_v2.py but WITHOUT the cross-process GPU lock: every worker
-process runs its GPU stages concurrently on the same card. This is for
-测试 only — it lets two full PipelineV2 instances hit the embedding-refinement
-memory peak at the same time, so it is more likely to OOM than main_v2.py.
-Use it to measure真实并发吞吐 / 复现显存峰值,不建议作为生产入口。
-
-``--num-workers`` controls the number of worker processes; each process owns
-its own PipelineV2 instance.
-
-Usage:
-    python main_v4.py --config <config.json> \
-                      --input <audio_or_folder> \
-                      --output <output_folder> \
-                      [--num-workers N]
-
-    python main_v4.py --config <config.json> \
-                      --manifest <manifest.parquet_or_shard_dir> \
-                      --audio-root <audio_root> \
-                      --output <output_folder> \
-                      [--min-duration SECONDS] \
-                      [--num-workers N]
-"""
 from __future__ import annotations
 
 import argparse
@@ -34,10 +10,8 @@ os.environ["TMPDIR"] = LARGE_TEMP_PATH
 os.environ["TEMP"] = LARGE_TEMP_PATH
 os.environ["TMP"] = LARGE_TEMP_PATH
 
-# 必须在 import torch 之前设置 allocator 配置。早期在单卡上启动多个 Pipeline
-# 时容易先触发显存申请失败,再进入依赖 NVML 的 OOM 诊断路径;关闭
-# expandable_segments 可避开已观察到的不稳定分配路径。这里会保留用户通过
-# 环境变量提供的其他 allocator 参数。
+# 必须在 import torch 之前设置 allocator 配置，避免先触发显存申请失败,再进入依赖 NVML 的 OOM 诊断路径;
+# 关闭expandable_segments 可避开已观察到的不稳定分配路径。
 _cuda_alloc_options = [
     option
     for option in os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "").split(",")
@@ -82,15 +56,6 @@ class ProcessTask:
     relative_path: str
     shard: str | None
 
-
-# ---------------------------------------------------------------------------
-# 单 GPU 多进程调度状态(测试版:无 GPU 锁)
-#
-# 每个 worker 进程各自创建一份 _WORKER_PIPE(进程隔离,天然避免线程版的跨
-# 线程原生对象 SIGSEGV);单 GPU 上因此有 num_workers 份模型权重常驻。
-# 与 main_v2 不同,这里没有跨进程 GPU 锁,多个进程会同时跑 GPU 阶段,更容易
-# 在 embedding refinement 处叠加显存峰值而 OOM——这正是本测试版要观察的。
-# ---------------------------------------------------------------------------
 _WORKER_PIPE: PipelineV2 | None = None
 
 
@@ -157,15 +122,14 @@ def collect_manifest_groups(
     audio_root: str,
     min_duration: float = 0.0,
 ) -> list[tuple[str, list[FileItem]]]:
-    """Read manifest shards and resolve their relative paths under audio_root."""
 
     from source_scan.manifest import list_shards, read_manifest
 
     if not os.path.exists(manifest):
-        print(f"manifest not found: {manifest}", file=sys.stderr)
+        logger.error(f"manifest not found: {manifest}")
         sys.exit(1)
     if not os.path.isdir(audio_root):
-        print(f"audio root not found or not a directory: {audio_root}", file=sys.stderr)
+        logger.error(f"audio root not found or not a directory: {audio_root}")
         sys.exit(1)
 
     shards = list_shards(manifest, "manifest") if os.path.isdir(manifest) else [manifest]
@@ -197,7 +161,7 @@ def collect_manifest_groups(
 
     if min_duration > 0:
         logger.info(
-            f"main_v4_min_duration_filter min {min_duration}s "
+            f"main_v2_min_duration_filter min {min_duration}s "
             f"kept {kept} skipped {skipped}"
         )
     return groups
@@ -260,10 +224,10 @@ def _process_one(task: ProcessTask) -> tuple[str, int, str]:
 def _log_result(result: tuple[str, int, str]) -> None:
     relative_path, segment_count, error = result
     if error:
-        logger.error(f"main_v4_failed file {relative_path} err {error}")
+        logger.error(f"main_v2_failed file {relative_path} err {error}")
     else:
         logger.info(
-            f"main_v4_done file {relative_path} segments {segment_count}"
+            f"main_v2_done file {relative_path} segments {segment_count}"
         )
 
 
@@ -323,7 +287,7 @@ def main() -> None:
         )
 
     logger.info(
-        f"main_v4 files {total} workers {num_workers} gpu_lock none "
+        f"main_v2 files {total} workers {num_workers} gpu_lock none "
         f"output {args.output} mode {'manifest' if manifest_mode else 'input'} "
         f"pipeline_version v2 "
         f"allocator_conf {os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')}"
@@ -333,7 +297,7 @@ def main() -> None:
         _init_worker(args.config)
         for shard_name, items in groups:
             tasks = _tasks_for_group(shard_name, items, args.output, manifest_mode)
-            for task in tqdm.tqdm(tasks, desc=f"pipeline_v4:{shard_name}"):
+            for task in tqdm.tqdm(tasks, desc=f"pipeline_v2:{shard_name}"):
                 _log_result(_process_one(task))
         return
 
@@ -347,7 +311,7 @@ def main() -> None:
             for result in tqdm.tqdm(
                 pool.imap_unordered(_process_one, tasks, chunksize=1),
                 total=len(tasks),
-                desc=f"pipeline_v4:{shard_name}",
+                desc=f"pipeline_v2:{shard_name}",
             ):
                 _log_result(result)
 

@@ -70,12 +70,17 @@ class EmbeddingRefiner:
         try:
             refined: list[Segment] = []
             n_short = n_no_ref = n_no_window = n_dropped = 0
+            n_too_long = 0
+            too_long_max = too_long_min = 0.0
             default_sim = self.params.inter_similarity_threshold
 
             cand: list[tuple[Segment, np.ndarray, list[np.ndarray]]] = []
             for seg in vad_list:
                 duration = seg.end - seg.start
                 if duration > _MAX_SEGMENT_DURATION_S:
+                    too_long_max = max(too_long_max, duration) if n_too_long else duration
+                    too_long_min = min(too_long_min, duration) if n_too_long else duration
+                    n_too_long += 1
                     continue
                 if duration < _MIN_SEGMENT_DURATION_S:
                     seg.min_similarity = default_sim
@@ -134,7 +139,9 @@ class EmbeddingRefiner:
         logger.info(
             f"emb_time_cost in {len(vad_list)} out {len(refined)} "
             f"short {n_short} no_ref {n_no_ref} no_window {n_no_window} "
-            f"dropped {n_dropped} total_ms {total_ms}",
+            f"dropped {n_dropped} too_long {n_too_long} "
+            f"too_long_max_s {too_long_max:.2f} too_long_min_s {too_long_min:.2f} "
+            f"total_ms {total_ms}",
             extra=log_tag,
         )
         return refined
