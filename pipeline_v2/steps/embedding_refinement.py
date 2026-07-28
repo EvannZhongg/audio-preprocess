@@ -131,7 +131,6 @@ class EmbeddingRefiner:
             return None
 
         total_ms = int((time.perf_counter() - t_total) * 1000)
-
         logger.info(
             f"emb_time_cost in {len(vad_list)} out {len(refined)} "
             f"short {n_short} no_ref {n_no_ref} no_window {n_no_window} "
