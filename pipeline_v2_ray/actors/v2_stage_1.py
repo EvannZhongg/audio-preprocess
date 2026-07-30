@@ -66,11 +66,9 @@ class GpuPipelineActor(PipelineActor):
 
         self._pipeline = PipelineV2(params)
 
-        # Only one file may occupy the GPU at a time; decode/export overlap.
-        # (standardize's SileroVAD also runs on the GPU, but it's tiny and only
-        # invoked for long-audio splitting -- sharing the CUDA context with the
-        # locked GPU stages is harmless.)
+        # Serialize the shared GPU stages and standardization pipeline separately.
         self._gpu_lock = threading.Lock()
+        self._cpu_lock = threading.Lock()
         logger.info(
             f"ray_actor_ready gpu {self._gpu_name} profile {self._profile_name}"
         )
@@ -96,10 +94,11 @@ class GpuPipelineActor(PipelineActor):
         try:
             # A decode failure means the whole file is unusable -> let the outer
             # guard in process_file turn it into a failed result.
-            chunk_states = self._pipeline.standardize(
-                PipelineState(audio_path=audio_path, relative_path=relative_path,
-                              shard=shard, log_tag=log_tag)
-            )
+            with self._cpu_lock:
+                chunk_states = self._pipeline.standardize(
+                    PipelineState(audio_path=audio_path, relative_path=relative_path,
+                                  shard=shard, log_tag=log_tag)
+                )
 
             n_segments = 0
             failed_chunks = 0

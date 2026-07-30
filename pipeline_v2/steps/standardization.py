@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -39,7 +38,6 @@ class Standardizer:
     def __init__(self, params: StandardizationParams, device: str = "cpu") -> None:
         self.params = params
         self.vad_model = SileroVAD(device=torch.device(device))
-        self._vad_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # public entry
@@ -144,31 +142,12 @@ class Standardizer:
         else:
             wav16 = waveform
 
-        intervals = None
-        for attempt in range(2):
-            try:
-                with self._vad_lock:
-                    reset_states = getattr(
-                        self.vad_model.vad_model, "reset_states", None
-                    )
-                    if callable(reset_states):
-                        try:
-                            reset_states()
-                        except Exception:
-                            pass
-                    intervals = self.vad_model._get_speech_timestamps_wrapper(
-                        wav16, _SILERO_SR
-                    )
-                break
-            except Exception as e:
-                if attempt == 0:
-                    logger.warning(
-                        f"std_split_silero_retry {type(e).__name__}: {e}",
-                        extra=log_tag,
-                    )
-                    continue
-                logger.error(f"std_split_silero_failed {e}", extra=log_tag)
-                return None
+        try:
+            self.vad_model.vad_model.reset_states()
+            intervals = self.vad_model._get_speech_timestamps_wrapper(wav16, _SILERO_SR)
+        except Exception as e:
+            logger.error(f"std_split_silero_failed {e}", extra=log_tag)
+            return None
         if not intervals:
             return None
 
