@@ -22,7 +22,13 @@ os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
 os.environ["TMPDIR"] = LARGE_TEMP_PATH
 os.environ["TEMP"] = LARGE_TEMP_PATH
 os.environ["TMP"] = LARGE_TEMP_PATH
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+_cuda_alloc_options = [
+    option
+    for option in os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "").split(",")
+    if option and not option.strip().startswith("expandable_segments:")
+]
+_cuda_alloc_options.append("expandable_segments:False")
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ",".join(_cuda_alloc_options)
 
 import sys
 import warnings
@@ -132,7 +138,15 @@ def main() -> None:
         logger.warning("no audio files to process")
         sys.exit(0)
 
-    ray.init(address=args.address, ignore_reinit_error=True)
+    ray.init(
+        address=args.address,
+        ignore_reinit_error=True,
+        runtime_env={
+            "env_vars": {
+                "PYTORCH_CUDA_ALLOC_CONF": os.environ["PYTORCH_CUDA_ALLOC_CONF"],
+            }
+        },
+    )
     driver = ClusterDriver(load_ray_config(args.ray_config), args.actor)
     results = []
     try:
