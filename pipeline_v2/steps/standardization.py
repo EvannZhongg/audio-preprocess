@@ -143,7 +143,6 @@ class Standardizer:
             wav16 = waveform
 
         try:
-            self.vad_model.vad_model.reset_states()
             intervals = self.vad_model._get_speech_timestamps_wrapper(wav16, _SILERO_SR)
         except Exception as e:
             logger.error(f"std_split_silero_failed {e}", extra=log_tag)
