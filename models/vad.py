@@ -21,14 +21,15 @@ class SileroVAD:
     Voice Activity Detection (VAD) using Silero-VAD.
     """
 
-    # Silero is a stateful JIT model and its runtime (ATen thread pool) is
-    # process-global, so concurrent inference corrupts the glibc heap
-    # ("malloc(): unsorted double linked list corrupted" -> SIGABRT). The
-    # pipeline builds TWO instances (Standardizer + VadDetector) guarded by
-    # different locks, so the lock must be CLASS level to serialize across
-    # instances. get_speech_timestamps() calls model.reset_states() itself, so
-    # holding this for the whole call also makes reset+inference atomic.
-    _GLOBAL_LOCK = threading.RLock()
+    # Silero is a stateful JIT model and its runtime (ATen thread pool) is process-global, so concurrent inference corrupts the glibc heap
+    # ("malloc(): unsorted double linked list corrupted" -> SIGABRT).
+    #
+    # CLASS level, not instance level: the pipeline builds TWO SileroVAD instances (Standardizer + VadDetector). 
+    # Moving this into __init__ would give each its own lock and they would not exclude each other, which is exactly the bug this fixes. get_speech_timestamps() calls
+    # model.reset_states() itself, so holding this for the whole call also
+    # makes reset+inference atomic.
+
+    _GLOBAL_LOCK = threading.Lock()
 
     def __init__(self, local=False, model="silero_vad", device=torch.device("cpu")):
         """
