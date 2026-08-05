@@ -42,7 +42,7 @@ def _setup_env() -> None:
     os.environ["TMPDIR"] = large_temp
     os.environ["TEMP"] = large_temp
     os.environ["TMP"] = large_temp
-    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    # os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 
 @register_actor("v2_stage_1")
