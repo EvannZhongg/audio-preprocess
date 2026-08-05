@@ -6,6 +6,8 @@
 #
 # Note: This code has been modified to fit the context of this repository.
 
+import threading
+
 import librosa
 import torch
 import numpy as np
@@ -18,6 +20,16 @@ class SileroVAD:
     """
     Voice Activity Detection (VAD) using Silero-VAD.
     """
+
+    # Silero is a stateful JIT model and its runtime (ATen thread pool) is process-global, so concurrent inference corrupts the glibc heap
+    # ("malloc(): unsorted double linked list corrupted" -> SIGABRT).
+    #
+    # CLASS level, not instance level: the pipeline builds TWO SileroVAD instances (Standardizer + VadDetector). 
+    # Moving this into __init__ would give each its own lock and they would not exclude each other, which is exactly the bug this fixes. get_speech_timestamps() calls
+    # model.reset_states() itself, so holding this for the whole call also
+    # makes reset+inference atomic.
+
+    _GLOBAL_LOCK = threading.Lock()
 
     def __init__(self, local=False, model="silero_vad", device=torch.device("cpu")):
         """
@@ -105,22 +117,26 @@ class SileroVAD:
     def _get_speech_timestamps_wrapper(self, audio_segment, sampling_rate):
         """
         统一的语音时间戳获取接口，兼容两种不同的API
+
+        全程持有 _GLOBAL_LOCK：Silero 模型本身有状态且底层运行时是进程级
+        共享的，多线程并发推理会踩坏堆内存。
         """
-        if self.use_pip_version:
-            # pip版本的API：get_speech_timestamps(wav, model, return_seconds=False)
-            return self.get_speech_timestamps(
-                audio_segment, 
-                self.vad_model, 
-                sampling_rate=sampling_rate,
-                return_seconds=False  # 返回采样点而不是秒
-            )
-        else:
-            # torch.hub版本的API：get_speech_timestamps(audio, model, sampling_rate=sampling_rate)
-            return self.get_speech_timestamps(
-                audio_segment, 
-                self.vad_model, 
-                sampling_rate=sampling_rate
-            )
+        with SileroVAD._GLOBAL_LOCK:
+            if self.use_pip_version:
+                # pip版本的API：get_speech_timestamps(wav, model, return_seconds=False)
+                return self.get_speech_timestamps(
+                    audio_segment,
+                    self.vad_model,
+                    sampling_rate=sampling_rate,
+                    return_seconds=False  # 返回采样点而不是秒
+                )
+            else:
+                # torch.hub版本的API：get_speech_timestamps(audio, model, sampling_rate=sampling_rate)
+                return self.get_speech_timestamps(
+                    audio_segment,
+                    self.vad_model,
+                    sampling_rate=sampling_rate
+                )
 
     def segment_speech(self, audio_segment, start_time, end_time, sampling_rate):
         """
