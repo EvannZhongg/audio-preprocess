@@ -19,8 +19,8 @@
         "language": "ko"
     },
     "qwen3_asr": {
-        "namespace": "Production",
-        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "namespace": "Test",
+        "service": "audio_process_qwen3_asr_service",
         "model_name": "Qwen/Qwen3-ASR-1.7B",
         "hot_words": ""
     },

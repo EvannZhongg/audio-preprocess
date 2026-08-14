@@ -15,5 +15,6 @@ from pipeline_v2_ray.actors.base import (ACTOR_REGISTRY, PipelineActor,
 
 # Side-effect imports: each registers its actor(s) into ACTOR_REGISTRY.
 from pipeline_v2_ray.actors import v2_stage_1  # noqa: F401,E402
+from pipeline_v2_ray.actors import v2_stage_2  # noqa: F401,E402
 
 __all__ = ["ACTOR_REGISTRY", "PipelineActor", "new_actor", "register_actor"]

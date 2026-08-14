@@ -7,29 +7,22 @@
             "fr",
             "ja",
             "ko",
-            "de",
-            "ru"
+            "de"
         ]
     },
-    "asr_provider": "qwen3_asr",
-    "validation_asr_provider": "funasr_nano",
+    "asr_provider": "funasr",
+    "validation_asr_provider": "paraformer",
+    "stage2_asr_provider": "qwen3_asr",
     "asr_validation": {
         "enable": true,
-        "wer_threshold": 0.4,
-        "language": "ja"
+        "wer_threshold": 0.15,
+        "language": "zh"
     },
     "qwen3_asr": {
         "namespace": "Test",
         "service": "audio_process_qwen3_asr_service",
         "model_name": "Qwen/Qwen3-ASR-1.7B",
         "hot_words": ""
-    },
-    "funasr_nano": {
-        "model": "FunAudioLLM/Fun-ASR-MLT-Nano-2512",
-        "model_dir_cache": "/root/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-MLT-Nano-2512",
-        "vad_model": "fsmn-vad",
-        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-        "batch_size": 16
     },
     "funasr": {
         "model": "iic/SenseVoiceSmall",
@@ -45,18 +38,18 @@
         "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
-        "batch_size": 256
+        "batch_size": 384
     },
-    "whisper": {
+    "whisper":{
         "model": "Systran/faster-distil-whisper-large-v3",
         "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
         "compute_type": "float16",
-        "batch_size": 12
+        "batch_size": 16
     },
     "diarization_provider": "pyannote",
     "pyannote": {
         "model": "pyannote/speaker-diarization-3.1",
-        "model_dir_cache": "ckpts/pyannote_config_v2.yaml"
+        "model_dir_cache": "ckpts/pyannote_config.yaml"
     },
     "gemini": {
         "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
@@ -94,32 +87,32 @@
             "chunk_size": 10,
             "valid_size": 8,
             "overlap": 2,
-            "batch_size": 4
+            "batch_size": 16
         }
     },
     "strategy_parameters": {
-        "merge_gap": 0.55,
-        "min_segment_length": 1.5,
+        "merge_gap": 0.6,
+        "min_segment_length": 2.0,
         "max_segment_length": 30.0,
         "strategy": "fixed",
         "fixed_dnsmos_threshold": 2.8,
         "fixed_c50_threshold": 40.0,
         "fixed_snr_threshold": 30.0,
-        "min_duration": 2.0,
-        "max_duration": 30.0,
+        "min_duration":2.0,
+        "max_duration":30.0,
         "lower_bound_percent": 10,
         "upper_bound_percent": 90,
         "min_char_count": 2.0,
-        "inter_similarity_threshold": 0.5,
-        "intra_similarity_threshold": 0.68,
-        "refinement_batch_size": 256
+        "inter_similarity_threshold": 0.69,
+        "intra_similarity_threshold": 0.64,
+        "refinement_batch_size": 384
     },
     "metrics": {
-        "dnsmos": {
+        "dnsmos":{
             "mos_model_path": "ckpts/sig_bak_ovr.onnx"
         },
         "use_brouhaha": true,
-        "brouhaha": {
+        "brouhaha":{
             "model": "pyannote/brouhaha",
             "model_dir_cache": "/root/.cache/torch/pyannote/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin"
         }
@@ -128,7 +121,7 @@
         "primary_model_path": "ckpts/sig_bak_ovr.onnx"
     },
     "text_quality": {
-        "enable": true,
+        "enable": false,
         "ppl": {
             "enable": true,
             "model": "Qwen/Qwen3-0.6B",
@@ -147,7 +140,7 @@
             "max_retries": 2
         },
         "thresholds": {
-            "ppl_max": 1000,
+            "ppl_max": 800,
             "spell_min": 0.3,
             "llm_quality_min": 5.0,
             "semantic_min": 5.0,
@@ -155,7 +148,7 @@
         }
     },
     "domain_annotation": {
-        "enable": true,
+        "enable": false,
         "text_domain": {
             "enable": true
         },
@@ -192,15 +185,14 @@
     "alignment": {
         "enable": true,
         "model_dir_cache": "/root/.cache/huggingface/hub",
-        "default_language": "ja",
+        "default_language": "zh",
         "language_models": {
             "zh": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-chinese-zh-cn",
             "en": "/root/.cache/huggingface/hub/models--facebook--wav2vec2-base-960h",
             "fr": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-french",
             "ja": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-japanese",
             "ko": "/root/.cache/huggingface/hub/models--kresnik--wav2vec2-large-xlsr-korean",
-            "de": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-german",
-            "ru": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-russian"
+            "de": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-german"
         },
         "thresholds": {
             "alignment_score_min": 0.55

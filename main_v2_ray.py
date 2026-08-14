@@ -22,7 +22,10 @@ os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
 os.environ["TMPDIR"] = LARGE_TEMP_PATH
 os.environ["TEMP"] = LARGE_TEMP_PATH
 os.environ["TMP"] = LARGE_TEMP_PATH
-# os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+#os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")    #A100上跑要开启， V100上关闭
+os.environ.setdefault("LD_PRELOAD", "/lib64/libcuda.so.1")      #A100上跑要开启， V100上关闭
+os.environ.setdefault("NCCL_P2P_DISABLE", "1")       #A100上跑要开启， V100上关闭
+os.environ.setdefault("NCCL_SHM_DISABLE", "1")        #A100上跑要开启， V100上关闭
 
 import sys
 import warnings
@@ -33,7 +36,7 @@ import ray
 import logger
 import pipeline_v2_ray.actors  # noqa: F401 -- importing the package registers all actors
 from pipeline_v2_ray.actors.base import ACTOR_REGISTRY
-from pipeline_v2_ray.config import load_ray_config
+from pipeline_v2_ray.config import load_ray_config, load_stage2_ray_config
 from pipeline_v2_ray.driver import ClusterDriver, FileItem
 from utils.tool import get_audio_files
 
@@ -43,14 +46,20 @@ warnings.filterwarnings("ignore")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--ray-config", default="configs/pipeline_v2_ray.yaml", help="ray hardware map")
-    # Input is either an ad-hoc file/folder (--input) or a prebuilt manifest
-    # (--manifest, whose relative_paths are resolved under --audio-root).
+    # Input is either an ad-hoc file/folder (--input), a prebuilt manifest
+    # (--manifest, whose relative_paths are resolved under --audio-root), or a
+    # stage-1 output folder (--stage1-output, for stage-2: remote ASR + v1
+    # post-processing on top of stage-1's already-exported chunk wavs).
     p.add_argument("--input", help="audio file or folder")
     p.add_argument("--manifest", help="manifest parquet (file or shard dir) from build_manifest.py")
     p.add_argument("--audio-root", help="audio root to resolve manifest relative_paths against")
+    p.add_argument("--stage1-output",
+                   help="stage-1 output folder to read segments from and write stage-2 "
+                        "results into (ASR + v1 post-processing mode, --actor v2_stage_2)")
     p.add_argument("--actor", default="v2_stage_1", choices=sorted(ACTOR_REGISTRY),
                    help="which processing actor to run")
-    p.add_argument("--output", required=True, help="output folder for exported jsons")
+    p.add_argument("--output", help="output folder for exported jsons; defaults to "
+                                "--stage1-output in stage-2 mode")
     p.add_argument("--address", default="auto", help="ray cluster address")
     p.add_argument("--min-duration", type=float, default=0.0,
                    help="skip manifest files shorter than this many seconds "
@@ -58,10 +67,15 @@ def parse_args() -> argparse.Namespace:
                         "Note: duration==0 means unknown/probe-failed, so it is "
                         "also skipped when this is > 0. Only applies to --manifest.")
     args = p.parse_args()
-    if bool(args.input) == bool(args.manifest):
-        p.error("provide exactly one of --input or --manifest")
+    modes = [bool(args.input), bool(args.manifest), bool(args.stage1_output)]
+    if sum(modes) != 1:
+        p.error("provide exactly one of --input, --manifest, or --stage1-output")
     if args.manifest and not args.audio_root:
         p.error("--manifest requires --audio-root to resolve relative paths")
+    if args.stage1_output:
+        args.output = args.output or args.stage1_output
+    elif not args.output:
+        p.error("--output is required for --input/--manifest modes")
     return args
 
 
@@ -119,10 +133,72 @@ def collect_manifest_paths(manifest: str, audio_root: str,
     return groups
 
 
+def collect_stage1_segments(stage1_output: str) -> list[tuple[str, list[FileItem]]]:
+    """Stage-2 input mode: read stage-1's segments_part-*.parquet from every
+    shard subdir of `stage1_output`, and group rows by `chunk_audio_path` --
+    one FileItem per stage-1 chunk wav, with `payload` set to that chunk's
+    stage-1 segments (start/end/speaker_id/utt_id/...).
+
+    `FileItem.relative_path` is the `chunk_audio_path` itself (output-root
+    relative, e.g. "<shard>/audios/<bucket>/<file>.wav"), since that -- not
+    any file-level path -- is the resume/dedup granularity stage 2 works at
+    (matches STAGE2_SEGMENT_SCHEMA.source). Rows belonging to a failed
+    stage-1 file (error set, no chunk_audio_path) are skipped: there's
+    nothing for stage 2 to re-process.
+    """
+    import pyarrow.parquet as pq
+
+    from source_scan.manifest import list_shards
+
+    groups: list[tuple[str, list[FileItem]]] = []
+    shard_names = sorted(
+        d for d in os.listdir(stage1_output)
+        if os.path.isdir(os.path.join(stage1_output, d))
+    )
+    cols = ["utt_id", "source", "chunk_index", "chunk_audio_path",
+            "speaker_id", "start", "end", "error"]
+    for shard_name in shard_names:
+        shard_dir = os.path.join(stage1_output, shard_name)
+        parts = list_shards(shard_dir, "segments")
+        if not parts:
+            continue
+        chunks: dict[str, list[dict]] = {}
+        for part in parts:
+            for row in pq.read_table(part, columns=cols).to_pylist():
+                if row.get("error") is not None or not row.get("chunk_audio_path"):
+                    continue  # failed-file placeholder row; nothing to re-process
+                chunks.setdefault(row["chunk_audio_path"], []).append(row)
+        items = []
+        for chunk_audio_path, rows in chunks.items():
+            rows.sort(key=lambda r: r.get("start") or 0.0)
+            payload = [
+                {
+                    "utt_id": r["utt_id"],
+                    "origin_source": r["source"],
+                    "chunk_index": r["chunk_index"],
+                    "speaker_id": r["speaker_id"],
+                    "start": r["start"],
+                    "end": r["end"],
+                }
+                for r in rows
+            ]
+            items.append(FileItem(
+                audio_path=os.path.join(stage1_output, chunk_audio_path),
+                relative_path=chunk_audio_path,
+                duration=sum((r.get("end") or 0.0) - (r.get("start") or 0.0) for r in rows),
+                payload=payload,
+            ))
+        if items:
+            groups.append((shard_name, items))
+    return groups
+
+
 def main() -> None:
     args = parse_args()
 
-    if args.manifest:
+    if args.stage1_output:
+        groups = collect_stage1_segments(args.stage1_output)
+    elif args.manifest:
         groups = collect_manifest_paths(args.manifest, args.audio_root, args.min_duration)
     else:
         if args.min_duration > 0:
@@ -132,8 +208,39 @@ def main() -> None:
         logger.warning("no audio files to process")
         sys.exit(0)
 
-    ray.init(address=args.address, ignore_reinit_error=True)
-    driver = ClusterDriver(load_ray_config(args.ray_config), args.actor)
+    # Propagate GPU-related env vars to every ray worker process (they were only
+    # set in this driver process above; workers inherit the env `ray start` was
+    # launched with, not this script's, so they must be injected explicitly).
+    worker_env_vars = {
+        k: os.environ[k]
+        for k in (
+            #"PYTORCH_CUDA_ALLOC_CONF",
+            "LD_PRELOAD",
+            "NCCL_P2P_DISABLE",
+            "NCCL_SHM_DISABLE",
+        )
+        if k in os.environ
+    }
+    ray.init(
+        address=args.address,
+        ignore_reinit_error=True,
+        runtime_env={"env_vars": worker_env_vars},
+    )
+    if args.stage1_output:
+        # Stage 2 flushes a distinct stage2_segments_part-*.parquet into the
+        # same shard dirs stage 1 already wrote to, with its own resume key
+        # (chunk_audio_path) -- see pipeline_v2_ray.stage2_segments.
+        from pipeline_v2_ray.stage2_segments import (error_record2,
+                                                      resume_state2,
+                                                      write_stage2_segments_shard)
+        driver = ClusterDriver(
+            load_stage2_ray_config(args.ray_config), args.actor,
+            segment_writer=write_stage2_segments_shard,
+            segment_resumer=resume_state2,
+            error_record_fn=error_record2,
+        )
+    else:
+        driver = ClusterDriver(load_ray_config(args.ray_config), args.actor)
     results = []
     try:
         driver.start()

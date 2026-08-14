@@ -222,8 +222,8 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             raise ValueError("qwen3_asr configuration not found in config.json")
         qwen3_cfg = cfg["qwen3_asr"]
         asr_model = qwen3_asr.load_asr_model(
-            namespace=qwen3_cfg.get("namespace", "Production"),
-            service=qwen3_cfg.get("service", "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService"),
+            namespace=qwen3_cfg.get("namespace", "Test"),
+            service=qwen3_cfg.get("service", "audio_process_qwen3_asr_service"),
             model_name=qwen3_cfg.get("model_name", "Qwen/Qwen3-ASR-1.7B"),
             device=device_name,
             hot_words=qwen3_cfg.get("hot_words", ""),

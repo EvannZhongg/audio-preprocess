@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import yaml
 
-from pipeline_v2.params import PipelineParams
+from pipeline_v2.params import PipelineParams, Stage2Params
 
 
 # Custom Ray resource each worker declares to cap how many pipeline actors it
@@ -127,3 +127,69 @@ def load_ray_config(path: str) -> RayConfig:
         raise ValueError(f"ray config {path} has no hardware profiles")
 
     return RayConfig(defaults=defaults, hardware=hardware)
+
+
+@dataclass(frozen=True)
+class Stage2HardwareProfile:
+    name: str                 # profile key, e.g. "v100"
+    match: str                # substring matched against torch.cuda.get_device_name(0)
+    pipeline_config: str      # absolute path to the pipeline config JSON (head node only)
+    params: Stage2Params      # pre-resolved on the head; shipped to actors verbatim
+
+
+@dataclass(frozen=True)
+class Stage2RayConfig:
+    """Same routing-table shape as RayConfig, but resolves to Stage2Params
+    (ASR + v1 post-processing config) instead of PipelineParams. Kept as a
+    separate type (not a generic) so each stage's yaml/JSON schema can drift
+    independently without touching the other."""
+    defaults: Defaults
+    hardware: dict[str, Stage2HardwareProfile]
+
+    def match_profile(self, gpu_name: str) -> Stage2HardwareProfile:
+        needle = gpu_name.lower()
+        for profile in self.hardware.values():
+            if profile.match.lower() in needle:
+                return profile
+        tried = [p.match for p in self.hardware.values()]
+        raise ProfileNotFoundError(gpu_name, tried)
+
+    def resolve_params(self, gpu_name: str) -> tuple[Stage2HardwareProfile, Stage2Params]:
+        profile = self.match_profile(gpu_name)
+        return profile, profile.params
+
+
+def load_stage2_ray_config(path: str) -> Stage2RayConfig:
+    """Stage-2 counterpart of `load_ray_config`: same yaml shape, parsed into
+    Stage2Params (via `Stage2Params.from_config`) instead of PipelineParams."""
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+
+    d = raw["defaults"]
+    defaults = Defaults(
+        max_files_per_actor=int(d["max_files_per_actor"]),
+        max_age_seconds=int(d["max_age_seconds"]),
+        max_concurrency=int(d["max_concurrency"]),
+    )
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+
+    hardware: dict[str, Stage2HardwareProfile] = {}
+    for name, spec in raw["hardware"].items():
+        cfg_path = spec["pipeline_config"]
+        if not os.path.isabs(cfg_path):
+            cfg_path = os.path.join(repo_root, cfg_path)
+        params = Stage2Params.from_config(cfg_path).model_copy(
+            update={"device_name": "cuda:0"}
+        )
+        hardware[name] = Stage2HardwareProfile(
+            name=name,
+            match=spec["match"],
+            pipeline_config=cfg_path,
+            params=params,
+        )
+
+    if not hardware:
+        raise ValueError(f"stage2 ray config {path} has no hardware profiles")
+
+    return Stage2RayConfig(defaults=defaults, hardware=hardware)

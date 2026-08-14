@@ -13,14 +13,15 @@
     },
     "asr_provider": "qwen3_asr",
     "validation_asr_provider": "whisper",
+    "stage2_asr_provider": "whisper",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.15,
         "language": "en"
     },
     "qwen3_asr": {
-        "namespace": "Production",
-        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "namespace": "Test",
+        "service": "audio_process_qwen3_asr_service",
         "model_name": "Qwen/Qwen3-ASR-1.7B",
         "hot_words": ""
     },

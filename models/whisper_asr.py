@@ -133,7 +133,12 @@ class VadFreeFasterWhisperPipeline(FasterWhisperPipeline):
                 yield {"inputs": chunk}
 
         if self.tokenizer is None:
-            language = language or self.detect_language(audio)
+            # detect_language() returns a (language, probability) tuple; only
+            # the language code should be kept here, otherwise the tuple gets
+            # passed straight into the tokenizer and later fails faster_whisper's
+            # language-code validation (e.g. "'(\'en\', 0.96)' is not a valid
+            # language code").
+            language = language or self.detect_language(audio)[0]
             task = task or "transcribe"
             self.tokenizer = faster_whisper.tokenizer.Tokenizer(
                 self.model.hf_tokenizer,

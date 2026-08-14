@@ -28,7 +28,12 @@ class Exporter:
     ) -> Optional[list[SegmentRecord]]:
         """Export one chunk's audio (WAV) + a sidecar JSON of its segments, and
         return the flat per-segment records for the driver to accumulate into
-        segments_part parquet. Returns None on failure/empty.
+        segments_part parquet. Returns `[]` when the chunk legitimately has no
+        surviving segments (e.g. music-only/no-speech chunk, or every candidate
+        was dropped by length/quality filters upstream) -- that's a successful,
+        zero-yield chunk, NOT a failure, so nothing is written to disk for it.
+        Returns `None` only on a real failure (write/IO error) -- see the
+        `except` below.
 
         `relative_path` is the source path relative to the audio root (same key
         as the stage-0 manifest). Its SHA-1 is the file id `base`, so the id is
@@ -41,8 +46,8 @@ class Exporter:
             <output_folder>/jsons/<base[:2]>/<base>_chunk<idx>.json
         """
         if not segment_list:
-            logger.error("export_empty_segment_list", extra=log_tag)
-            return None
+            logger.info("export_empty_segment_list", extra=log_tag)
+            return []
 
         t_total = time.perf_counter()
         try:

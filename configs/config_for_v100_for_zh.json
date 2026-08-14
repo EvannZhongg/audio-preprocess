@@ -13,14 +13,15 @@
     },
     "asr_provider": "funasr",
     "validation_asr_provider": "paraformer",
+    "stage2_asr_provider": "qwen3_asr",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.15,
         "language": "zh"
     },
     "qwen3_asr": {
-        "namespace": "Production",
-        "service": "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        "namespace": "Test",
+        "service": "audio_process_qwen3_asr_service",
         "model_name": "Qwen/Qwen3-ASR-1.7B",
         "hot_words": ""
     },
@@ -48,8 +49,9 @@
         "batch_size": 256
     },
     "whisper": {
-        "model": "Systran/faster-distil-whisper-large-v3",
-        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
+        "model": "h2oai/faster-whisper-large-v3-turbo",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--h2oai--faster-whisper-large-v3-turbo/snapshots/0d50161d23807098c6b7ed53bbb70c7ce02702b9",
+        "language": "zh",
         "compute_type": "float16",
         "batch_size": 12
     },

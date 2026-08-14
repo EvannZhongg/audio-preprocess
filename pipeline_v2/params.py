@@ -169,3 +169,91 @@ class PipelineParams(BaseModel):
             },
         }
         return cls.model_validate(v2)
+
+
+class Stage2Params(BaseModel):
+    """Parameter schema for the stage-2 pipeline (ASR + v1 post-processing).
+
+    Sub-sections are kept as raw dicts (rather than fully-typed sub-models)
+    because they are passed through almost verbatim to v1's model loaders /
+    functions (`init_pipeline_global`, `annotate_domains`, etc.), which already
+    validate/consume their own keys. This avoids duplicating v1's schema here
+    and keeps this file in sync automatically when v1's config gains new keys.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    device_name: str
+
+    # Which ASR backend to load. "whisper" is the local fallback (default) and
+    # runs entirely on-device; "qwen3_asr" is the remote service. Both expose
+    # the same duck-typed contract (transcribe -> {"segments", "language"}), so
+    # switching only requires changing this one field — stage-2 runner/actor/
+    # parquet/resume logic is unaffected.
+    #
+    # NOTE: sourced from the config json's "stage2_asr_provider" key, NOT the
+    # legacy top-level "asr_provider" — that key already has different
+    # semantics for v1's own cross-validation pipeline (funasr/paraformer/
+    # whisper/qwen3_asr/gemini, see pipeline/global_var.py:load_asr_model) and
+    # some shared config files (e.g. config_for_v100_for_zh.json) set it to
+    # values ("funasr") stage 2 doesn't understand. Keeping a dedicated key
+    # means any legacy config can be reused for stage 2 unmodified, always
+    # safely defaulting to the local whisper fallback.
+    asr_provider: str = "whisper"
+
+    # Local ASR (faster-whisper / WhisperX) config section. Consumed only when
+    # asr_provider == "whisper".
+    whisper: dict[str, Any] = {}
+    # Remote ASR (Qwen3, Polaris + HTTP) config section. Consumed only when
+    # asr_provider == "qwen3_asr".
+    qwen3_asr: dict[str, Any]
+    domain_annotation: dict[str, Any]
+    speaking_rate: dict[str, Any]
+    silence_filter: dict[str, Any]
+    alignment: dict[str, Any]
+    text_quality: dict[str, Any]
+
+    # --- ASR cross-validation (mirrors v1's pipeline/asr_process.py asr()
+    # "ASR Cross-Validation Logic" block) ---
+    # Which v1 `load_asr_model` provider (gemini/funasr/funasr_nano/
+    # paraformer/whisper/qwen3_asr) to use for the *second*, verification-only
+    # ASR pass. Sourced from the legacy top-level "validation_asr_provider"
+    # key -- already present, unmodified, in every shared config json.
+    validation_asr_provider: str = "whisper"
+    # {"enable": bool, "language": str, "wer_threshold": float}, sourced
+    # verbatim from the legacy top-level "asr_validation" key. Consumed by
+    # stage2/runner.py exactly like v1's asr(): enable gates the whole
+    # feature, language drives the detected-language filter + CER-vs-WER
+    # choice, wer_threshold is the pass/fail cutoff.
+    asr_validation: dict[str, Any] = {}
+    # Full, unmodified original config dict. Needed only so the validation
+    # ASR model can be loaded via v1's `pipeline.global_var.load_asr_model`
+    # (which indexes cfg["funasr"]/cfg["paraformer"]/cfg["gemini"]/etc. --
+    # sub-sections stage2 otherwise never parses), without duplicating v1's
+    # schema here.
+    raw_cfg: dict[str, Any] = {}
+
+    @classmethod
+    def from_config(cls, config_path: str) -> "Stage2Params":
+        """Read the relevant sections straight out of a v1 config json
+        (configs/config_for_*.json). No remapping: v1's post-processing
+        functions and model loaders consume these dicts directly.
+        """
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+
+        return cls.model_validate(
+            {
+                "device_name": cfg.get("device_name", "cuda:0"),
+                "asr_provider": cfg.get("stage2_asr_provider", "whisper"),
+                "whisper": cfg.get("whisper", {}),
+                "qwen3_asr": cfg.get("qwen3_asr", {}),
+                "domain_annotation": cfg.get("domain_annotation", {}),
+                "speaking_rate": cfg.get("speaking_rate", {}),
+                "silence_filter": cfg.get("silence_filter", {}),
+                "alignment": cfg.get("alignment", {}),
+                "text_quality": cfg.get("text_quality", {}),
+                "validation_asr_provider": cfg.get("validation_asr_provider", "whisper"),
+                "asr_validation": cfg.get("asr_validation", {}),
+                "raw_cfg": cfg,
+            }
+        )

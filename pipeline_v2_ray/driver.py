@@ -52,6 +52,12 @@ class FileItem:
     audio_path: str      # full filesystem path to decode
     relative_path: str   # path relative to audio root; export id hash + join key
     duration: float = 0.0  # source audio seconds (from manifest); for RTF throughput
+    # Extra per-file context handed straight to process_file(); unused by
+    # stage 1 (raw-audio decode). Stage 2 uses it to carry the stage-1
+    # segments (start/end/speaker_id/utt_id/...) for the chunk wav being
+    # re-processed, so the driver's dispatch/pool/resume machinery stays
+    # generic across both stages.
+    payload: object = None
 
 
 @dataclass
@@ -85,7 +91,10 @@ class _Actor:
 
 
 class ClusterDriver:
-    def __init__(self, ray_config: RayConfig, actor_name: str) -> None:
+    def __init__(self, ray_config: RayConfig, actor_name: str, *,
+                 segment_writer=write_segments_shard,
+                 segment_resumer=resume_state,
+                 error_record_fn=error_record) -> None:
         self._config = ray_config
         # CLI-selected actor name; resolved to a ray actor handle per spawn via
         # actors.base.new_actor. The driver stays agnostic to the concrete actor.
@@ -94,6 +103,13 @@ class ClusterDriver:
         # so models are loaded once, not per manifest shard.
         self._actors: list[_Actor] = []
         self._last_reconcile: float = 0.0
+        # Injectable so the same pool/dispatch/resume machinery can flush
+        # either stage 1's segments_part-*.parquet (default) or stage 2's
+        # stage2_segments_part-*.parquet (pipeline_v2_ray.stage2_segments),
+        # without duplicating run_batch.
+        self._write_segments_shard = segment_writer
+        self._resume_state = segment_resumer
+        self._error_record = error_record_fn
 
     # ------------------------------------------------------------------
     # actor pool
@@ -187,7 +203,7 @@ class ClusterDriver:
         shard_out = os.path.join(output_folder, shard_name)
         # Resume: skip files already recorded in this shard's segments_part
         # parquets, and continue part numbering after them (don't overwrite).
-        done, seg_part = resume_state(shard_out)
+        done, seg_part = self._resume_state(shard_out)
         if done:
             items = [it for it in items if it.relative_path not in done]
             logger.info(
@@ -195,6 +211,16 @@ class ClusterDriver:
                 f"resume at part {seg_part}, remaining {len(items)}"
             )
         results: list[FileResult] = []
+        # Longest-first (LPT) dispatch: sort by duration descending before
+        # queuing, so the biggest files go out first while many actors are
+        # freshly idle (shard start / after a growth), instead of risking
+        # several long files landing back-to-back on the same actor near the
+        # tail -- which would stall just that one actor (and therefore the
+        # whole shard, since run_batch waits for every file) long after every
+        # other actor has finished. Only matters in --manifest mode where
+        # duration is probed; in --input mode all durations are 0.0, so this
+        # sort is a no-op (stable sort preserves original order).
+        items = sorted(items, key=lambda it: it.duration, reverse=True)
         pending: deque[FileItem] = deque(items)
         ref_owner: dict[ray.ObjectRef, _Actor] = {}
         seg_buffer: list = []
@@ -203,7 +229,7 @@ class ClusterDriver:
             nonlocal seg_part
             if not seg_buffer:
                 return
-            write_segments_shard(seg_buffer, shard_out, seg_part)
+            self._write_segments_shard(seg_buffer, shard_out, seg_part)
             logger.info(f"ray_segments_flush shard {shard_name} part {seg_part} rows {len(seg_buffer)}")
             seg_part += 1
             seg_buffer.clear()
@@ -215,7 +241,7 @@ class ClusterDriver:
                     item = pending.popleft()
                     # export adds audios/jsons + hash-bucket levels beneath shard_out.
                     ref = actor.handle.process_file.remote(
-                        item.audio_path, shard_out, item.relative_path, shard_name
+                        item.audio_path, shard_out, item.relative_path, shard_name, item.payload
                     )
                     actor.inflight[ref] = item
                     actor.files_submitted += 1
@@ -264,13 +290,13 @@ class ClusterDriver:
                 # Replacement is left to reconcile.
                 logger.error(f"ray_actor_crash file {path} err {e}")
                 results.append(FileResult(path, success=False, error=f"actor crashed: {e}"))
-                seg_buffer.append(error_record(item.relative_path, shard_name, f"actor crashed: {e}"))
+                seg_buffer.append(self._error_record(item.relative_path, shard_name, f"actor crashed: {e}"))
                 prog.n_done += 1
                 prog.n_failed += 1
                 prog.audio_secs += item.duration
                 for lost_ref, lost_item in actor.inflight.items():
                     results.append(FileResult(lost_item.audio_path, success=False, error="actor crashed"))
-                    seg_buffer.append(error_record(lost_item.relative_path, shard_name, "actor crashed"))
+                    seg_buffer.append(self._error_record(lost_item.relative_path, shard_name, "actor crashed"))
                     prog.n_done += 1
                     prog.n_failed += 1
                     prog.audio_secs += lost_item.duration
@@ -283,7 +309,7 @@ class ClusterDriver:
                 # this file; keep the actor and its other in-flight work.
                 logger.error(f"ray_task_error file {path} err {type(e).__name__}: {e}")
                 results.append(FileResult(path, success=False, error=f"task error: {e}"))
-                seg_buffer.append(error_record(item.relative_path, shard_name, f"task error: {e}"))
+                seg_buffer.append(self._error_record(item.relative_path, shard_name, f"task error: {e}"))
                 prog.n_done += 1
                 prog.n_failed += 1
                 prog.audio_secs += item.duration
@@ -301,7 +327,7 @@ class ClusterDriver:
                 prog.seg_total += len(fr.segments)
             else:
                 prog.n_failed += 1
-                seg_buffer.append(error_record(item.relative_path, shard_name, fr.error))
+                seg_buffer.append(self._error_record(item.relative_path, shard_name, fr.error))
             if len(seg_buffer) >= SEG_SHARD_SIZE:
                 flush()
 

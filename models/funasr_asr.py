@@ -26,9 +26,20 @@ class FunASR:
 
     def __init__(self, asr_model: str, model_dir: str, vad_model_dir: str, device: str, punc_model_dir: str = 'ct-punc-c', **kwargs):
         logger.info(f"Loading FunASR model from: {model_dir}")
-        lock_dir = os.path.dirname(model_dir)
+        # Lock key must NOT depend on which form of `model_dir` the caller
+        # resolved (absolute cache path vs. bare hub id like "iic/xxx"),
+        # otherwise concurrent actors on the same machine can pick different
+        # lock files for the *same* underlying model: one process may be
+        # mid-download (cache dir just created but incomplete) while another
+        # process's os.path.exists() check flips to True and it loads the
+        # half-written directory directly -> "not registered" errors on
+        # fresh machines. Using a fixed, machine-local lock dir + the model's
+        # basename ensures all callers contend for the same lock regardless
+        # of which branch (cache-hit vs. hub-id) they took.
+        lock_dir = os.path.join(tempfile.gettempdir(), "funasr_model_locks")
         os.makedirs(lock_dir, exist_ok=True)
-        lock_file = os.path.join(lock_dir, f"{os.path.basename(model_dir)}.lock")
+        lock_key = os.path.basename(model_dir.rstrip("/")) or model_dir.replace("/", "_")
+        lock_file = os.path.join(lock_dir, f"{lock_key}.lock")
 
         self.device = device
         self.asr_model = asr_model

@@ -74,12 +74,15 @@ class GpuPipelineActor(PipelineActor):
         )
 
     def process_file(self, audio_path: str, output_folder: str,
-                     relative_path: str, shard: str) -> dict:
+                     relative_path: str, shard: str, payload=None) -> dict:
         """Process one file; returns a serializable FileResult dict. Runs on a
         Ray worker thread (max_concurrency>1), overlapping its decode/export
         with other files' GPU work. Never raises: any error (including edge
         cases outside the inner per-stage handlers) becomes a failed result, so
-        the driver never sees this as an actor-level crash."""
+        the driver never sees this as an actor-level crash.
+
+        `payload` is unused: stage 1 decodes raw audio from scratch and has no
+        upstream per-file context to receive."""
         try:
             return self._process_file_inner(audio_path, output_folder, relative_path, shard)
         except Exception as e:  # noqa: BLE001 - last-resort guard; keep the actor alive

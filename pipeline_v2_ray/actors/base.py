@@ -19,10 +19,14 @@ class PipelineActor(ABC):
 
     @abstractmethod
     def process_file(self, audio_path: str, output_folder: str,
-                     relative_path: str, shard: str) -> dict:
+                     relative_path: str, shard: str, payload=None) -> dict:
         """Process one file; return a serializable FileResult dict. Must NEVER
         raise -- any error becomes a failed FileResult so the driver doesn't see
-        an actor-level crash."""
+        an actor-level crash.
+
+        `payload` is opaque, per-file extra context set on FileItem.payload by
+        the caller building the batch; stage 1 (raw-audio decode) ignores it,
+        stage 2 uses it to carry the stage-1 segments being re-processed."""
         ...
 
 

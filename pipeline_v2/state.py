@@ -47,6 +47,46 @@ class SegmentRecord(TypedDict):
     error: Optional[str]
 
 
+class Stage2SegmentRecord(TypedDict):
+    """One flat row of stage2_segments_part parquet (mirrors
+    STAGE2_SEGMENT_SCHEMA in pipeline_v2_ray/stage2_segments.py). Produced by
+    the stage-2 runner, accumulated and flushed by the ray driver.
+
+    Keyed by `chunk_audio_path` (not `source`) so resume dedup happens per
+    stage-1 chunk wav, matching the granularity stage 2 actually processes.
+    `origin_source` keeps the stage-1 file-level relative_path for joining
+    back to the stage-0/1 manifest.
+    """
+    utt_id: Optional[str]              # same utt_id as the stage-1 SegmentRecord; None on a failed-chunk row
+    source: str                        # chunk_audio_path; resume/dedup key for stage 2
+    origin_source: Optional[str]       # stage-1 relative_path (file-level)
+    shard: Optional[str]
+    pipeline_version: str
+    chunk_index: Optional[int]
+    chunk_audio_path: Optional[str]
+    start: Optional[float]             # seconds, within the chunk
+    end: Optional[float]
+    seg_duration: Optional[float]
+    speaker_id: Optional[str]
+    text: Optional[str]                # ASR transcript
+    language: Optional[str]
+    domain_text: Optional[str]
+    domain_acoustic: Optional[str]
+    domain_speaker: Optional[str]
+    speaking_rate: Optional[float]     # chars (or words) per second
+    alignment_score: Optional[float]
+    ppl: Optional[float]               # perplexity score
+    llm_text_score: Optional[float]
+    dropped_by_silence: Optional[bool]
+    dropped_by_alignment: Optional[bool]
+    dropped_by_text_quality: Optional[bool]
+    dropped_by_speaking_rate: Optional[bool]
+    dropped_by_asr_validation: Optional[bool]
+    asr_wer: Optional[float]           # WER (or CER for zh/ja/ko) vs. the validation ASR pass
+    asr_val_text: Optional[str]        # transcript from the validation ASR pass
+    error: Optional[str]
+
+
 @dataclass
 class Segment:
     """A single span produced by VAD; mutated through downstream stages.

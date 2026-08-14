@@ -4,11 +4,9 @@ This module provides a Qwen3-ASR model wrapper that uses Polaris service discove
 to connect to a vLLM-served Qwen3-ASR instance for speech recognition.
 """
 
-import base64
 import gc
 import logging
 import os
-import re
 import tempfile
 from typing import Any, Dict, List, Optional
 
@@ -51,10 +49,15 @@ class Qwen3ASR:
         'Turkish': 'tr',
     }
 
+    # Set of ISO codes the new /v1/audio/transcriptions endpoint is expected
+    # to return directly (values of LANGUAGE_MAPPING). Used only as a sanity
+    # check for the fallback described below.
+    _ISO_LANGUAGE_CODES = set(LANGUAGE_MAPPING.values())
+
     def __init__(
         self,
-        namespace: str = "Production",
-        service: str = "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+        namespace: str = "Test",
+        service: str = "audio_process_qwen3_asr_service",
         model_name: str = "Qwen/Qwen3-ASR-1.7B",
         device: str = "cuda",
         hot_words: Optional[str] = None,
@@ -148,7 +151,7 @@ class Qwen3ASR:
         """
         import requests
 
-        # Save audio to temporary WAV file and encode as base64
+        # Save audio to a temporary WAV file to upload as multipart/form-data
         custom_temp_dir = os.environ.get("LARGE_TEMP_DIR", None)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False, dir=custom_temp_dir) as f:
             temp_path = f.name
@@ -156,80 +159,50 @@ class Qwen3ASR:
         try:
             sf.write(temp_path, audio_segment, sample_rate)
 
-            with open(temp_path, 'rb') as f:
-                audio_data = f.read()
-            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-            audio_source = f"data:audio/wav;base64,{audio_base64}"
-
-            # Prepare request content
-            content = [
-                {
-                    "type": "audio_url",
-                    "audio_url": {"url": audio_source}
-                }
-            ]
-
-            # Add hot words if provided
-            effective_hot_words = hot_words or self.hot_words
-            if effective_hot_words and effective_hot_words.strip():
-                content.append({
-                    "type": "text",
-                    "text": effective_hot_words.strip()
-                })
-
-            payload = {
-                "model": self.model_name,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": content
-                    }
-                ]
-            }
-
-            # Get instance and make request
+            # Get instance and make request. The real service expects a
+            # plain multipart file upload, e.g.:
+            #   curl -sS -F file=@chunk.wav http://{host}:{port}/v1/audio/transcriptions
+            # and returns a flat JSON body: {"text": "...", "language": "zh"}.
             host, port = self._get_next_instance()
-            url = f"http://{host}:{port}/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
+            url = f"http://{host}:{port}/v1/audio/transcriptions"
 
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+            effective_hot_words = hot_words or self.hot_words
+            data = {}
+            if effective_hot_words and effective_hot_words.strip():
+                # Tentative: the documented interface only requires "file".
+                # Forward hot words as an extra form field on a best-effort
+                # basis; if the backend doesn't support it, it will simply
+                # be ignored and won't affect the main transcription flow.
+                data["hot_words"] = effective_hot_words.strip()
+
+            with open(temp_path, 'rb') as f:
+                files = {"file": (os.path.basename(temp_path), f, "audio/wav")}
+                response = requests.post(
+                    url, files=files, data=data or None, timeout=self.timeout
+                )
             response.raise_for_status()
 
             result = response.json()
 
-            # Extract transcription text
-            content_text = result["choices"][0]["message"]["content"]
+            # New endpoint returns a flat JSON: {"text": "...", "language": "zh"}
+            text = (result.get("text") or "").strip()
+            detected_language = (result.get("language") or "unknown").strip()
 
-            # Parse Qwen3-ASR output format: language <language_name><asr_text>text
-            # Example: "language Chinese<asr_text>你好世界"
-            lang_match = re.match(r'language\s+(\w+)<asr_text>(.*)', content_text, re.DOTALL)
+            # The endpoint is expected to already return an ISO code (e.g.
+            # "zh"). Keep a lightweight fallback in case the backend ever
+            # returns a full language name instead.
+            if detected_language not in self._ISO_LANGUAGE_CODES and detected_language != "unknown":
+                detected_language = self.LANGUAGE_MAPPING.get(detected_language, detected_language)
 
-            if lang_match:
-                detected_language = lang_match.group(1).strip()
-                text = lang_match.group(2).strip()
-            else:
-                # Fallback: try to extract text after <asr_text> tag
-                asr_text_match = re.search(r'<asr_text>(.*)', content_text, re.DOTALL)
-                if asr_text_match:
-                    text = asr_text_match.group(1).strip()
-                    detected_language = "unknown"
-                else:
-                    detected_language = "unknown"
-                    text = content_text.strip()
-
-            # Map language name to ISO code
-            lang_code = self.LANGUAGE_MAPPING.get(detected_language, 'unknown')
+            lang_code = detected_language or 'unknown'
 
             if not text:
-                logger.warning(f"Qwen3-ASR returned empty text. Raw response: {content_text[:200]}")
-
-            if lang_code == 'unknown' and detected_language != 'unknown':
-                logger.warning(f"Qwen3-ASR detected unknown language mapping: '{detected_language}'")
+                logger.warning(f"Qwen3-ASR returned empty text. Raw response: {str(result)[:200]}")
 
             return {
                 'text': text,
                 'language': lang_code,
-                'language_full': detected_language,
+                'language_full': lang_code,
             }
 
         except requests.exceptions.Timeout:
@@ -346,8 +319,8 @@ class Qwen3ASR:
 
 
 def load_asr_model(
-    namespace: str = "Production",
-    service: str = "trpc.Serving.QwenASR17ServerVllmQwenASR.ChatService",
+    namespace: str = "Test",
+    service: str = "audio_process_qwen3_asr_service",
     model_name: str = "Qwen/Qwen3-ASR-1.7B",
     device: str = "cuda",
     hot_words: Optional[str] = None,

@@ -7,6 +7,33 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+
+# LD_PRELOAD (and friends) are read by the dynamic linker only once, at
+# process exec() time. Mutating os.environ after the interpreter is already
+# running -- which is all `os.environ.setdefault(...)` below used to do --
+# has NO effect on which libcuda.so *this* process resolves, because ld.so
+# already finished its startup-time library resolution before this line
+# ever executes. If the default search order (ld.so.cache / LD_LIBRARY_PATH)
+# happens to pick up a stale/incompatible libcuda.so, you still hit
+# `RuntimeError: ... Error 803: system has unsupported display driver /
+# cuda driver combination` even though this script "set" LD_PRELOAD --
+# exactly like running `python main_v2.py ...` without first `export`-ing it
+# in the shell. So: if any of these aren't already present, re-exec ourselves
+# once with the corrected environment (equivalent to `export ...; python
+# main_v2.py ...`) instead of patching an environ nobody will re-read.
+_REQUIRED_ENV = {
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",  # A100上跑要开启， V100上关闭
+    "LD_PRELOAD": "/lib64/libcuda.so.1",                    # A100上跑要开启， V100上关闭
+    "NCCL_P2P_DISABLE": "1",                                # A100上跑要开启， V100上关闭
+    "NCCL_SHM_DISABLE": "1",                                # A100上跑要开启， V100上关闭
+}
+if os.environ.get("_MAIN_V2_REEXECED") != "1":
+    _missing = {k: v for k, v in _REQUIRED_ENV.items() if k not in os.environ}
+    if _missing:
+        os.environ.update(_missing)
+        os.environ["_MAIN_V2_REEXECED"] = "1"
+        os.execve(sys.executable, [sys.executable] + sys.argv, os.environ)
 
 LARGE_TEMP_PATH = f"{os.getcwd()}/TEMP"
 os.makedirs(LARGE_TEMP_PATH, exist_ok=True)
@@ -14,9 +41,7 @@ os.environ["LARGE_TEMP_DIR"] = LARGE_TEMP_PATH
 os.environ["TMPDIR"] = LARGE_TEMP_PATH
 os.environ["TEMP"] = LARGE_TEMP_PATH
 os.environ["TMP"] = LARGE_TEMP_PATH
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-import sys
 import warnings
 from pathlib import Path
 
