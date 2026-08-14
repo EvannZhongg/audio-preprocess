@@ -13,6 +13,7 @@
     },
     "asr_provider": "qwen3_asr",
     "validation_asr_provider": "funasr",
+    "stage2_asr_provider": "qwen3_asr",
     "asr_validation": {
         "enable": true,
         "wer_threshold": 0.4,
