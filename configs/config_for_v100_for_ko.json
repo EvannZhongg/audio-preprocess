@@ -189,7 +189,7 @@
         }
     },
     "alignment": {
-        "enable": true,
+        "enable": false,
         "model_dir_cache": "/root/.cache/huggingface/hub",
         "default_language": "ko",
         "language_models": {
