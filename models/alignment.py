@@ -169,46 +169,59 @@ class WhisperXAligner:
 
         try:
             import whisperx
-
-            # Whisperx expects 'whisper-style' segment dicts
-            whisper_segments = [
-                {
-                    "text": s.get("text", ""),
-                    "start": float(s.get("start", 0.0)),
-                    "end": float(s.get("end", 0.0)),
-                }
-                for s in segments
-            ]
-
-            result = whisperx.align(
-                whisper_segments,
-                model_a,
-                metadata,
-                audio_16k,
-                self.device,
-                return_char_alignments=False,
-            )
-
-            aligned_segs = result.get("segments", []) if isinstance(result, dict) else []
-            scores = []
-            # match output length to input by index. WhisperX preserves order.
-            for i, _ in enumerate(segments):
-                if i >= len(aligned_segs):
-                    scores.append(-1.0)
-                    continue
-                words = aligned_segs[i].get("words", [])
-                word_scores = [
-                    float(w["score"])
-                    for w in words
-                    if isinstance(w, dict) and "score" in w and w["score"] is not None
-                ]
-                if not word_scores:
-                    scores.append(-1.0)
-                else:
-                    avg = sum(word_scores) / len(word_scores)
-                    # clamp to [0, 1] just in case
-                    scores.append(max(0.0, min(1.0, avg)))
-            return scores
         except Exception as e:
             logger.warning(f"WhisperX align failed for language={language}: {e}")
             return [-1.0] * len(segments)
+
+        # NOTE: whisperx.align() internally splits each input segment's text
+        # into sentences (nltk punkt, on '.', '!', '?', etc.) and, on
+        # successful alignment, emits ONE OUTPUT SEGMENT PER SENTENCE. So a
+        # single multi-sentence input segment can expand into N output
+        # segments — the output length is NOT guaranteed to match the input
+        # length, and output[i] does NOT reliably correspond to input[i].
+        # Aligning by index (as a naive batched call would) silently drops
+        # words from multi-sentence segments and shifts all subsequent
+        # segments' scores onto the wrong text.
+        #
+        # To stay correct regardless of how many sentences a segment
+        # contains, we align ONE segment at a time and pool the words from
+        # ALL sub-segments whisperx returns for that call. whisperx already
+        # slices audio_16k per-segment internally, so this has no extra
+        # compute cost vs. batching multiple segments in one call.
+        scores = []
+        for s in segments:
+            whisper_segment = {
+                "text": s.get("text", ""),
+                "start": float(s.get("start", 0.0)),
+                "end": float(s.get("end", 0.0)),
+            }
+            try:
+                result = whisperx.align(
+                    [whisper_segment],
+                    model_a,
+                    metadata,
+                    audio_16k,
+                    self.device,
+                    return_char_alignments=False,
+                )
+            except Exception as e:
+                logger.warning(f"WhisperX align failed for language={language}: {e}")
+                scores.append(-1.0)
+                continue
+
+            aligned_segs = result.get("segments", []) if isinstance(result, dict) else []
+            word_scores = []
+            for aseg in aligned_segs:
+                words = aseg.get("words", [])
+                word_scores.extend(
+                    float(w["score"])
+                    for w in words
+                    if isinstance(w, dict) and "score" in w and w["score"] is not None
+                )
+            if not word_scores:
+                scores.append(-1.0)
+            else:
+                avg = sum(word_scores) / len(word_scores)
+                # clamp to [0, 1] just in case
+                scores.append(max(0.0, min(1.0, avg)))
+        return scores
