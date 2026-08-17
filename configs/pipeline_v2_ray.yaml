@@ -30,7 +30,7 @@
 defaults:
   max_files_per_actor: 10000      # recycle actor after N files (memory safety valve)
   max_age_seconds: 36000         # or after M seconds alive, whichever comes first
-  max_concurrency: 1            # files in flight per actor (Ray max_concurrency); decode+export
+  max_concurrency: 3            # files in flight per actor (Ray max_concurrency); decode+export
                                 # of these overlap while the GPU stays serialized by a lock
 
 hardware:
