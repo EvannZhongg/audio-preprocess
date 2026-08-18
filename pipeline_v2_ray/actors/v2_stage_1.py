@@ -5,11 +5,17 @@ PipelineParams from the RayConfig shipped by the head node (no config file IO),
 and builds a PipelineV2 with all models resident on cuda:0.
 
 Concurrency model: the actor is created with Ray max_concurrency=N, so up to N
-process_file() calls run on separate threads at once. Decode (ffmpeg, CPU) and
-export (mp3 write, CPU/JuiceFS) run unlocked and therefore overlap freely; the
-GPU stages are guarded by a single per-actor lock so exactly one file occupies
-the GPU at a time. This overlaps IO with compute -- keeping the GPU busy --
-without any explicit prefetch queue.
+process_file() calls run on separate threads at once. Decode (ffmpeg, CPU),
+standardization/split and export (mp3 write, CPU/JuiceFS) all run unlocked and
+therefore overlap freely across files -- each spawns its own subprocess or
+works on purely local data, so there is no shared mutable state to race on.
+The only genuinely thread-unsafe piece, Silero VAD inference (used both here
+during long-file splitting and later in the VAD stage), guards itself via
+SileroVAD._GLOBAL_LOCK (see models/vad.py) at the call-site granularity, so it
+does not need to be serialized here too. The GPU stages are guarded by a
+single per-actor lock so exactly one file occupies the GPU at a time. This
+overlaps IO with compute -- keeping the GPU busy -- without any explicit
+prefetch queue.
 
 The actor does not self-recycle; the driver tracks per-actor lifecycle state
 (files submitted, age) and decides when to retire it.
@@ -66,9 +72,12 @@ class GpuPipelineActor(PipelineActor):
 
         self._pipeline = PipelineV2(params)
 
-        # Serialize the shared GPU stages and standardization pipeline separately.
+        # Serialize the shared GPU stages. Standardization does NOT need a
+        # lock here: ffmpeg decode/probe each run in their own subprocess and
+        # normalize() only touches local arrays, and the one genuinely
+        # thread-unsafe piece (Silero VAD inference during long-file split)
+        # already serializes itself via SileroVAD._GLOBAL_LOCK.
         self._gpu_lock = threading.Lock()
-        self._cpu_lock = threading.Lock()
         logger.info(
             f"ray_actor_ready gpu {self._gpu_name} profile {self._profile_name}"
         )
@@ -96,12 +105,13 @@ class GpuPipelineActor(PipelineActor):
         log_tag = make_extra_tags(audio_file=relative_path, version=PIPELINE_VERSION)
         try:
             # A decode failure means the whole file is unusable -> let the outer
-            # guard in process_file turn it into a failed result.
-            with self._cpu_lock:
-                chunk_states = self._pipeline.standardize(
-                    PipelineState(audio_path=audio_path, relative_path=relative_path,
-                                  shard=shard, log_tag=log_tag)
-                )
+            # guard in process_file turn it into a failed result. Unlocked: see
+            # __init__ comment above for why this is thread-safe across
+            # concurrently-running files.
+            chunk_states = self._pipeline.standardize(
+                PipelineState(audio_path=audio_path, relative_path=relative_path,
+                              shard=shard, log_tag=log_tag)
+            )
 
             n_segments = 0
             failed_chunks = 0
