@@ -151,6 +151,8 @@ class ComputeScore:
             audio = librosa.resample(audio, orig_sr=sampling_rate, target_sr=fs)
 
         actual_audio_len = len(audio)
+        if actual_audio_len == 0:
+            raise ValueError("empty audio passed to DNSMOS, cannot score")
 
         len_samples = int(INPUT_LENGTH * fs)
         while len(audio) < len_samples:

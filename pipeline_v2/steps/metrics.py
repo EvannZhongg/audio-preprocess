@@ -68,6 +68,14 @@ class MetricsScorer:
         for seg in segment_list:
             start = int(seg.start * _FEAT_SR)
             end = int(seg.end * _FEAT_SR)
+            if end <= start:
+                n_seg_failed += 1
+                logger.error(
+                    f"metrics_segment_zero_len start {seg.start:.2f} end {seg.end:.2f} "
+                    f"dur {seg.end - seg.start:.2f}",
+                    extra=log_tag,
+                )
+                continue
             chunk = audio_16k[start:end]
             try:
                 seg.dnsmos = float(
