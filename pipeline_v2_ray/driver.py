@@ -43,6 +43,11 @@ from pipeline_v2_ray.segments import (SEG_SHARD_SIZE, error_record,
 RECONCILE_INTERVAL = 60.0   # seconds between cluster-size reconciliations
 WAIT_TIMEOUT = 5.0          # ray.wait poll timeout; also bounds reconcile latency
 PROGRESS_INTERVAL = 30.0    # seconds between progress/throughput log lines
+FLUSH_INTERVAL = 300.0      # seconds between time-based segment flushes, so an
+                            # interruption mid-shard loses at most this much
+                            # progress instead of the whole (still-buffered)
+                            # shard -- on top of the existing SEG_SHARD_SIZE
+                            # row-count-based flush.
 
 
 @dataclass
@@ -193,7 +198,9 @@ class ClusterDriver:
         returning, so the shard's output is complete at a clean boundary. Uses
         the persistent pool (reconciling elastically as it goes). Segment records
         are buffered and written to <output>/<shard>/segments_part-NNNNN.parquet
-        every SEG_SHARD_SIZE rows, with the remainder flushed when the shard
+        every SEG_SHARD_SIZE rows, or every FLUSH_INTERVAL seconds (whichever
+        comes first) so an interruption never loses more than one flush
+        interval of progress, with the remainder flushed when the shard
         finishes. Returns this shard's per-file results."""
         concurrency = max(1, self._config.defaults.max_concurrency)
         max_files = self._config.defaults.max_files_per_actor
@@ -224,9 +231,11 @@ class ClusterDriver:
         pending: deque[FileItem] = deque(items)
         ref_owner: dict[ray.ObjectRef, _Actor] = {}
         seg_buffer: list = []
+        last_flush = time.time()
 
         def flush() -> None:
-            nonlocal seg_part
+            nonlocal seg_part, last_flush
+            last_flush = time.time()
             if not seg_buffer:
                 return
             self._write_segments_shard(seg_buffer, shard_out, seg_part)
@@ -265,6 +274,13 @@ class ClusterDriver:
             # Periodic progress / throughput line.
             if time.time() - prog.last_t >= PROGRESS_INTERVAL:
                 self._log_progress(shard_name, prog)
+
+            # Periodic time-based flush: guarantees progress is durable at
+            # least every FLUSH_INTERVAL even if the shard never accumulates
+            # SEG_SHARD_SIZE rows (or takes far longer than that to do so),
+            # bounding how much work an interruption can throw away.
+            if seg_buffer and time.time() - last_flush >= FLUSH_INTERVAL:
+                flush()
 
             if not ref_owner:
                 # No work in flight but files remain -> cluster has no slots

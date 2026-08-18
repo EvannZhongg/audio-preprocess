@@ -8,6 +8,7 @@ import gc
 import logging
 import os
 import tempfile
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -54,6 +55,11 @@ class Qwen3ASR:
     # check for the fallback described below.
     _ISO_LANGUAGE_CODES = set(LANGUAGE_MAPPING.values())
 
+    # How often to re-pull the instance list from Polaris (seconds). Without
+    # this, instances are discovered once at construction time and newly
+    # added machines never receive traffic until the process is restarted.
+    INSTANCE_REFRESH_INTERVAL = 60.0
+
     def __init__(
         self,
         namespace: str = "Test",
@@ -80,6 +86,7 @@ class Qwen3ASR:
         self.consumer_api = None
         self.instances = []
         self.current_instance_idx = 0
+        self._last_discover_time = 0.0
 
         self._init_polaris()
 
@@ -109,24 +116,52 @@ class Qwen3ASR:
                 response = self.consumer_api.get_all_instances(request)
             else:
                 response = self.consumer_api.get_instances(request)
-            self.instances = []
+            instances = []
             for inst in response:
                 host = inst.get_host()
                 port = inst.get_port()
-                self.instances.append((host, port))
+                instances.append((host, port))
 
-            if not self.instances:
+            if not instances:
                 raise RuntimeError(f"No instances found for {self.namespace}/{self.service}")
 
+            self.instances = instances
+            self._last_discover_time = time.time()
             logger.info(f"Discovered {len(self.instances)} Qwen3-ASR instances")
         except SDKError as e:
             raise RuntimeError(f"Polaris service discovery failed: {repr(e)}")
+
+    def _maybe_refresh_instances(self):
+        """Periodically re-pull the instance list from Polaris so newly added
+        (or removed) machines join/leave the round-robin rotation without
+        requiring the process to restart. A transient Polaris failure here
+        must not break in-flight requests, so we keep serving with the
+        existing (possibly stale) list on error."""
+        if time.time() - self._last_discover_time < self.INSTANCE_REFRESH_INTERVAL:
+            return
+        # Reset the timer up front so a failure doesn't cause a retry storm
+        # (next attempt is still gated by the interval below).
+        self._last_discover_time = time.time()
+        old_count = len(self.instances)
+        try:
+            self._discover_instances()
+            if len(self.instances) != old_count:
+                logger.info(
+                    f"Qwen3-ASR instance list refreshed: {old_count} -> {len(self.instances)}"
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Qwen3-ASR periodic instance refresh failed, keep old list: {e}")
 
     def _get_next_instance(self) -> tuple:
         """Get next instance using round-robin load balancing."""
         if not self.instances:
             self._discover_instances()
+        else:
+            self._maybe_refresh_instances()
 
+        # Guard against the list having shrunk since the index was last set.
+        if self.current_instance_idx >= len(self.instances):
+            self.current_instance_idx = 0
         instance = self.instances[self.current_instance_idx]
         self.current_instance_idx = (self.current_instance_idx + 1) % len(self.instances)
         return instance
