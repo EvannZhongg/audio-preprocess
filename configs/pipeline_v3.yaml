@@ -1,0 +1,78 @@
+# pipeline_v3 multi-stage map.
+#
+# ONE file describes every configured stage, in pipeline order (stage_1 then
+# stage_2 today; add more `stages:` entries -- plus a matching StageDef in
+# pipeline_v3/stages.py -- to extend to stage_3+). Each stage is a routing
+# table with the SAME shape as the old pipeline_v2_ray.yaml /
+# pipeline_v2_ray_stage2.yaml: per-GPU hardware profiles + actor lifecycle
+# defaults. See those files for the full match_profile()/pipe_slot rationale;
+# the only real difference here is that every stage gets its OWN custom Ray
+# resource (`resource:`, defaults to slot_<stage_key>) instead of sharing one
+# `pipe_slot` -- so stage_1 and stage_2 actor pools are sized and scheduled
+# independently, while still able to share the same physical GPU (each actor
+# only reserves a tiny GPU fraction).
+#
+# Per-machine slot counts are declared at `ray start` time, per stage:
+#
+#   ray start --address=<head> --resources='{"slot_stage_1": 3, "slot_stage_2": 4}'
+#
+# `actor:` names must be registered in pipeline_v2_ray.actors.ACTOR_REGISTRY
+# (imported by main_v3_ray.py); which Params class parses each stage's
+# `pipeline_config` JSON, and how one stage's finished result feeds the next
+# stage, are declared in code, in pipeline_v3/stages.py -- this yaml and that
+# registry must agree on stage keys.
+
+stages:
+  stage_1:
+    actor: v2_stage_1
+    resource: slot_stage_1        # optional; default is slot_<stage_key>, i.e. slot_stage_1
+
+    defaults:
+      max_files_per_actor: 10000      # recycle actor after N files (memory safety valve)
+      max_age_seconds: 36000          # or after M seconds alive, whichever comes first
+      max_concurrency: 3               # files in flight per actor (Ray max_concurrency)
+
+    hardware:
+      v100:
+        match: "V100"                 # matched against torch.cuda.get_device_name(0)
+        pipeline_config: configs/config_for_v100_for_ko.json
+
+      p40:
+        match: "P40"
+        pipeline_config: configs/config_for_p40.json
+
+      # NOTE: must be listed (and thus matched) BEFORE "a10" below, since
+      # match_profile() does a substring test and "a10" is itself a substring
+      # of "a100" -- reversing the order would make every A100 GPU incorrectly
+      # match the a10 profile.
+      a100:
+        match: "A100"
+        pipeline_config: configs/config_for_a100.json
+
+      a10:
+        match: "A10"
+        pipeline_config: configs/config_for_a10.json
+
+  stage_2:
+    actor: v2_stage_2
+    resource: slot_stage_2        # optional; default is slot_<stage_key>, i.e. slot_stage_2
+
+    defaults:
+      max_files_per_actor: 10000
+      max_age_seconds: 36000
+      max_concurrency: 4
+
+    hardware:
+      v100:
+        match: "V100"
+        pipeline_config: configs/config_for_v100_for_ko.json
+
+      # NOTE: must be listed (and thus matched) BEFORE "a10" below -- same
+      # substring-matching caveat as stage_1 above.
+      a100:
+        match: "A100"
+        pipeline_config: configs/config_for_a100.json
+
+      a10:
+        match: "A10"
+        pipeline_config: configs/config_for_a10_for_en.json

@@ -29,6 +29,14 @@ google-generativeai
 # funasr: must be >=1.3 for Fun-ASR-MLT-Nano-2512 support.
 # (We previously pinned 1.2.4 then upgraded in dockerfile; consolidated here.)
 funasr>=1.3.0
+# Required by funasr.models.sense_voice.whisper_lib.normalizers (borrowed from
+# openai-whisper's text normalizer). Not declared as a hard dep by funasr, but
+# its absence makes that submodule's import raise ModuleNotFoundError, which
+# cascades into the whole `funasr.models.sense_voice` package failing to
+# initialize -- silently skipping the `SenseVoiceSmall` model's registration
+# (@tables.register never runs) and surfacing later as a confusing
+# "model 'SenseVoiceSmall' is not registered" RuntimeError at load time.
+more_itertools
 aiohttp==3.9.2
 faster-whisper==1.1.0
 whisperx>=3.3.0
