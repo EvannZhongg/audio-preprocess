@@ -117,7 +117,7 @@ class PipelineParams(BaseModel):
                 "target_sample_rate": entrypoint.get("SAMPLE_RATE", 24000),
                 "num_threads": cfg.get("threads", 4),
                 "ffmpeg_timeout": 200,
-                "max_audio_duration_seconds": 10 * 3600,
+                "max_audio_duration_seconds": 5 * 3600,
                 "max_file_size_bytes": 5 * 1024 * 1024 * 1024,
                 "target_dbfs": -20.0,
                 "chunk_min_seconds": 600.0,

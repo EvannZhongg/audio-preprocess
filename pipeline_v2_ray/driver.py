@@ -25,6 +25,7 @@ reconcile simply stops replacing them.
 from __future__ import annotations
 
 import os
+import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -218,16 +219,16 @@ class ClusterDriver:
                 f"resume at part {seg_part}, remaining {len(items)}"
             )
         results: list[FileResult] = []
-        # Longest-first (LPT) dispatch: sort by duration descending before
-        # queuing, so the biggest files go out first while many actors are
-        # freshly idle (shard start / after a growth), instead of risking
-        # several long files landing back-to-back on the same actor near the
-        # tail -- which would stall just that one actor (and therefore the
-        # whole shard, since run_batch waits for every file) long after every
-        # other actor has finished. Only matters in --manifest mode where
-        # duration is probed; in --input mode all durations are 0.0, so this
-        # sort is a no-op (stable sort preserves original order).
-        items = sorted(items, key=lambda it: it.duration, reverse=True)
+        # Randomized dispatch: shuffle before queuing so long files are spread
+        # out across actors/time instead of clustering. We previously sorted
+        # longest-first (LPT), but that reliably packed several multi-hour
+        # files onto the same actor's concurrent slots at once, stacking their
+        # peak memory and OOM-killing the whole worker. A random order breaks
+        # that clustering; --manifest mode has real durations while --input
+        # mode has all-zero durations, but shuffling is a no-op either way in
+        # terms of correctness.
+        items = list(items)
+        random.shuffle(items)
         pending: deque[FileItem] = deque(items)
         ref_owner: dict[ray.ObjectRef, _Actor] = {}
         seg_buffer: list = []
