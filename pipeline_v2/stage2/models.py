@@ -122,8 +122,22 @@ def _load_asr_model(provider: str, params: Stage2Params, device_name: str, logge
         import models.qwen3_asr as qwen3_asr_mod
 
         asr_cfg = params.qwen3_asr or {}
+        # Chunk-level batching knobs: segments of one chunk are grouped into
+        # `batch_size`-sized batch requests, and up to `max_group_workers` of
+        # those requests fly concurrently. Both are optional -- omitting them
+        # keeps the model wrapper's own defaults, so existing configs work
+        # unchanged.
+        batch_size = int(
+            asr_cfg.get("batch_size", qwen3_asr_mod.Qwen3ASR.DEFAULT_BATCH_SIZE)
+        )
+        max_group_workers = int(
+            asr_cfg.get(
+                "max_group_workers", qwen3_asr_mod.Qwen3ASR.DEFAULT_MAX_GROUP_WORKERS
+            )
+        )
         logger.info(
-            f"Stage2: loading remote qwen3_asr (device={device_name})"
+            f"Stage2: loading remote qwen3_asr (device={device_name}, "
+            f"batch_size={batch_size}, max_group_workers={max_group_workers})"
         )
         return qwen3_asr_mod.load_asr_model(
             namespace=asr_cfg.get("namespace", "Test"),
@@ -133,6 +147,8 @@ def _load_asr_model(provider: str, params: Stage2Params, device_name: str, logge
             model_name=asr_cfg.get("model_name", "Qwen/Qwen3-ASR-1.7B"),
             device=device_name,
             hot_words=asr_cfg.get("hot_words", ""),
+            batch_size=batch_size,
+            max_group_workers=max_group_workers,
         )
 
     raise ValueError(
