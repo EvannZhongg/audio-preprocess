@@ -99,7 +99,7 @@
         }
     },
     "strategy_parameters": {
-        "merge_gap": 0.55,
+        "merge_gap": 1,
         "min_segment_length": 1.5,
         "max_segment_length": 30.0,
         "strategy": "fixed",
