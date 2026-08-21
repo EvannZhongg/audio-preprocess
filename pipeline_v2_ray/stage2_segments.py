@@ -18,7 +18,9 @@ import os
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from pipeline_v2.state import PIPELINE_VERSION, Stage2SegmentRecord
+import logger
+from pipeline_v2.state import (ASR_ACCESS_FAILED_MARKER, PIPELINE_VERSION,
+                               Stage2SegmentRecord)
 
 SEG_SHARD_SIZE = 100_000
 
@@ -84,15 +86,49 @@ def write_stage2_segments_shard(records: list, out_dir: str, part_index: int) ->
     return path
 
 
+def _is_retriable_error(error) -> bool:
+    """Whether an `error` cell marks a failure worth retrying on the next run.
+
+    Only remote-ASR access failures qualify: they're transient
+    (service drained / timed out / answered garbage), not a property of the
+    chunk itself. Every other failure (poison chunk, actor crash, task error)
+    keeps the original "record it and never retry" semantics, since retrying
+    those just reproduces the crash.
+    """
+    return isinstance(error, str) and ASR_ACCESS_FAILED_MARKER in error
+
+
 def resume_state2(shard_dir: str) -> tuple[set, int]:
     """Read every existing `stage2_segments_part-*.parquet` in `shard_dir` and
     return the set of already-processed `source` (chunk_audio_path) values
-    plus the next free part index (mirrors `segments.resume_state`)."""
+    plus the next free part index (mirrors `segments.resume_state`).
+
+    Rows whose `error` is a retriable remote-ASR failure are deliberately
+    excluded from the "done" set, so those chunks get reprocessed instead of
+    being skipped forever with a lost transcript. Membership is a union over
+    all parts ("any non-retriable row wins"), which converges correctly when an
+    older part holds the ASR failure row and a newer part holds the successful
+    retry."""
     parts = sorted(glob.glob(os.path.join(shard_dir, "stage2_segments_part-*.parquet")))
     sources: set = set()
+    retriable: set = set()
     for p in parts:
         try:
-            sources.update(pq.read_table(p, columns=["source"])["source"].to_pylist())
+            table = pq.read_table(p, columns=["source", "error"])
         except Exception:  # noqa: BLE001 - a truncated/corrupt shard shouldn't block resume
             continue
+        for source, error in zip(
+            table["source"].to_pylist(), table["error"].to_pylist()
+        ):
+            if _is_retriable_error(error):
+                retriable.add(source)
+            else:
+                sources.add(source)
+    # Only chunks with *no* completed row anywhere are handed back for retry.
+    pending_retry = retriable - sources
+    if pending_retry:
+        logger.info(
+            f"stage2_resume_retry dir {shard_dir} retry {len(pending_retry)} chunks "
+            f"previously failed with {ASR_ACCESS_FAILED_MARKER}"
+        )
     return sources, len(parts)

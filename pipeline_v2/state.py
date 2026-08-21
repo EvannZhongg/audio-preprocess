@@ -16,6 +16,16 @@ import pandas as pd
 # of failed-file rows) share one definition without an upward import.
 PIPELINE_VERSION = "v2"
 
+# Marker embedded in the `error` column of a stage-2 failure row when the
+# failure was "couldn't reach / couldn't get a usable answer from the remote
+# ASR service". Unlike every other stage-2 failure (poison chunk, actor crash,
+# task error) this one is transient and NOT the chunk's fault, so the resume
+# logic treats such rows as "not done" and reprocesses them on the next run.
+# Lives here in the core layer so the stage-2 runner (which raises it) and the
+# ray driver's resume code (which matches it) share one definition without
+# either importing the other.
+ASR_ACCESS_FAILED_MARKER = "asr_access_failed"
+
 
 class SegmentRecord(TypedDict):
     """One flat row of segments_part parquet (mirrors SEGMENT_SCHEMA in

@@ -34,8 +34,27 @@ from pipeline.text_quality_filtering import (filter_by_text_quality,
                                              text_quality_prediction)
 from pipeline_v2.params import Stage2Params
 from pipeline_v2.stage2.models import Stage2Models
+from pipeline_v2.state import ASR_ACCESS_FAILED_MARKER
 
 _ASR_SR = 16000
+
+
+class AsrAccessFailedError(RuntimeError):
+    """Raised when the remote ASR service could not be reached / did not
+    answer usably for at least one segment of a chunk.
+
+    This is deliberately an exception rather than a degraded result: the empty
+    text such a failure produces is indistinguishable from a genuinely silent
+    segment once written out, so persisting it would silently lose data forever
+    (resume would never revisit the chunk). Raising instead makes the chunk a
+    failed chunk whose `error` carries `ASR_ACCESS_FAILED_MARKER`, which the
+    resume logic recognizes as retriable.
+
+    Whole-chunk granularity is intentional: segments of a chunk share batch
+    requests and service instances, so a failure is usually batch- or
+    instance-level, and retrying the chunk matches the resume key
+    (`chunk_audio_path`) exactly.
+    """
 
 # Fields possibly attached by any post-processing stage. Set on every
 # segment up front so that a segment dropped early (and thus skipped by
@@ -190,6 +209,11 @@ def run_stage2_asr(
         A list parallel to `chunk_segments` (same length/order), each a
         fresh dict with ASR text/language plus all `_DEFAULT_FIELDS`
         pre-filled (to be overwritten by `run_stage2_postprocess`).
+
+    Raises:
+        AsrAccessFailedError: at least one segment's remote ASR call failed
+            (timeout / HTTP error / malformed response). Nothing is written
+            back for the chunk so it can be retried on a later run.
     """
     from pipeline.global_var import PipelineParam
 
@@ -223,6 +247,17 @@ def run_stage2_asr(
     default_language = asr_out.get("language") or params.alignment.get(
         "default_language", "en"
     )
+
+    # Bail out before any post-processing / write-back if the remote service
+    # failed on any segment: the resulting empty text would be
+    # indistinguishable from real silence downstream, so we'd rather fail the
+    # chunk (retriable) than persist a partially-lost transcript.
+    n_failed = sum(1 for seg in asr_segments if isinstance(seg, dict) and seg.get("asr_failed"))
+    if n_failed:
+        raise AsrAccessFailedError(
+            f"{ASR_ACCESS_FAILED_MARKER}: remote ASR failed for {n_failed}/"
+            f"{len(asr_segments)} segments of this chunk"
+        )
 
     if len(asr_segments) != len(chunk_segments):
         logger.warning(

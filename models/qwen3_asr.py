@@ -6,7 +6,6 @@ to connect to a vLLM-served Qwen3-ASR instance for speech recognition.
 
 import gc
 import io
-import logging
 import os
 import tempfile
 import time
@@ -17,7 +16,12 @@ import numpy as np
 import soundfile as sf
 import torch
 
-logger = logging.getLogger(__name__)
+# Project logger package (writes to logs/app.log via ConcurrentRotatingFileHandler),
+# not `logging.getLogger(__name__)`: the latter has no handler wired up under
+# ray workers, so everything here used to be swallowed / dumped to stderr only.
+# The module exposes info/warning/error/... directly, so existing `logger.info(...)`
+# call sites keep working unchanged.
+import logger
 
 
 class Qwen3ASR:
@@ -125,8 +129,37 @@ class Qwen3ASR:
                 "Please ensure the polaris-cpp-py package is installed in the environment."
             )
 
+    @staticmethod
+    def _is_instance_usable(inst) -> bool:
+        """Whether a Polaris instance should receive traffic.
+
+        `get_all_instances` deliberately returns the *raw* registry, including
+        instances an operator has taken out of rotation. Round-robining over
+        that list sends requests to boxes that are being drained or are weighted
+        out, so filter them here:
+          * isolated  -> explicitly taken offline in Polaris;
+          * weight 0  -> weighted out of load balancing.
+        Both accessors are best-effort: an SDK build that lacks them (or throws)
+        must not make the instance unusable, so treat unknown as usable.
+        """
+        try:
+            if inst.is_isolated():
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if inst.get_weight() == 0:
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
     def _discover_instances(self):
-        """Discover service instances via Polaris."""
+        """Discover service instances via Polaris.
+
+        Only usable instances (not isolated, non-zero weight) enter the
+        round-robin rotation; see `_is_instance_usable`.
+        """
         from polaris.pkg.model.service import GetInstancesRequest
         from polaris.pkg.model.error import SDKError
 
@@ -138,17 +171,30 @@ class Qwen3ASR:
             else:
                 response = self.consumer_api.get_instances(request)
             instances = []
+            total = 0
             for inst in response:
+                total += 1
+                if not self._is_instance_usable(inst):
+                    continue
                 host = inst.get_host()
                 port = inst.get_port()
                 instances.append((host, port))
 
+            # Checked *after* filtering: an all-isolated / all-zero-weight
+            # service is as unusable as an empty one, and failing loudly beats
+            # silently round-robining over drained boxes.
             if not instances:
-                raise RuntimeError(f"No instances found for {self.namespace}/{self.service}")
+                raise RuntimeError(
+                    f"No usable instances found for {self.namespace}/{self.service} "
+                    f"({total} discovered, all isolated or weight=0)"
+                )
 
             self.instances = instances
             self._last_discover_time = time.time()
-            logger.info(f"Discovered {len(self.instances)} Qwen3-ASR instances")
+            logger.info(
+                f"Discovered {len(self.instances)} usable Qwen3-ASR instances "
+                f"(filtered out {total - len(self.instances)} isolated/zero-weight of {total})"
+            )
         except SDKError as e:
             raise RuntimeError(f"Polaris service discovery failed: {repr(e)}")
 
@@ -263,25 +309,31 @@ class Qwen3ASR:
 
         except requests.exceptions.Timeout:
             logger.warning(f"Qwen3-ASR request timed out after {self.timeout}s")
-            return {'text': '', 'language': 'unknown', 'language_full': 'unknown'}
+            return self._empty_result()
         except requests.exceptions.RequestException as e:
             logger.error(f"Qwen3-ASR HTTP error: {e}")
-            return {'text': '', 'language': 'unknown', 'language_full': 'unknown'}
+            return self._empty_result()
         except Exception as e:
             logger.error(f"Qwen3-ASR transcription error: {e}")
-            return {'text': '', 'language': 'unknown', 'language_full': 'unknown'}
+            return self._empty_result()
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
     @staticmethod
     def _empty_result() -> Dict[str, Any]:
-        """Uniform "no transcription" payload used for every failure path.
+        """Uniform "ASR access failed" payload used for every failure path.
 
-        Failures are intentionally degraded into empty text (instead of raised)
-        so that one bad segment / one bad batch never aborts a whole chunk.
+        Failures are still degraded into empty text (instead of raised) so that
+        one bad segment / one bad batch never aborts the in-flight requests of
+        the other groups. The `failed` flag is what makes such a degraded
+        result distinguishable from a genuinely silent segment: `transcribe()`
+        propagates it as `asr_failed`, and the stage-2 runner turns it into a
+        retriable chunk-level failure instead of writing empty text out as if
+        it were real data.
         """
-        return {'text': '', 'language': 'unknown', 'language_full': 'unknown'}
+        return {'text': '', 'language': 'unknown', 'language_full': 'unknown',
+                'failed': True}
 
     def _parse_result_payload(self, result: Any) -> Dict[str, Any]:
         """Normalize one per-file JSON payload into the internal contract.
@@ -498,11 +550,14 @@ class Qwen3ASR:
             segment_audio = audio[start_frame:end_frame]
 
             if len(segment_audio) == 0:
+                # Genuinely empty slice, not a request failure -> explicitly
+                # not flagged, so it never triggers a chunk-level retry.
                 segments[idx] = {
                     "text": "",
                     "start": round(segment_info["start"], 3),
                     "end": round(segment_info["end"], 3),
                     "speaker": segment_info.get("speaker", None),
+                    "asr_failed": False,
                 }
                 continue
 
@@ -548,6 +603,7 @@ class Qwen3ASR:
 
         detected_language = "unknown"
         empty_count = sum(1 for seg in segments if seg is not None)
+        failed_count = 0
 
         for (group_indices, group_audios), results in zip(groups, group_results):
             if results is None:
@@ -556,9 +612,12 @@ class Qwen3ASR:
                 segment_info = vad_segments[idx]
                 text = result.get('text', '').strip()
                 seg_language = result.get('language', 'unknown')
+                seg_failed = bool(result.get('failed', False))
 
                 if not text:
                     empty_count += 1
+                if seg_failed:
+                    failed_count += 1
 
                 # Use the first successfully detected language as the overall
                 # language. Note this is now resolved in segment order (not
@@ -573,6 +632,10 @@ class Qwen3ASR:
                     "end": round(segment_info["end"], 3),
                     "speaker": segment_info.get("speaker", None),
                     "detected_language": seg_language,
+                    # True == the remote call for this segment failed (timeout /
+                    # HTTP error / malformed response), so its empty text is a
+                    # data loss, not a silent segment.
+                    "asr_failed": seg_failed,
                 }
 
         # Last-resort guard: every slot must be a dict, since the caller pairs
@@ -590,13 +653,18 @@ class Qwen3ASR:
                 "end": round(segment_info["end"], 3),
                 "speaker": segment_info.get("speaker", None),
                 "detected_language": "unknown",
+                # Unreachable in theory; if it ever happens it IS lost data, so
+                # flag it rather than let it pass as a legitimate empty segment.
+                "asr_failed": True,
             }
             empty_count += 1
+            failed_count += 1
 
-        logger.info(
+        log = logger.error if failed_count else logger.info
+        log(
             f"Qwen3-ASR transcribe done: {len(segments)} segments in "
             f"{len(groups)} batch request(s) (batch_size={self.batch_size}), "
-            f"{empty_count} empty, language={detected_language}"
+            f"{empty_count} empty, {failed_count} failed, language={detected_language}"
         )
 
         # Clear memory
