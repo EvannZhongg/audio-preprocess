@@ -6,8 +6,12 @@ process. Every selected stage gets its own actor pool, gated by its own Ray
 custom resource (slot_stage_1, slot_stage_2, ... configurable in
 configs/pipeline_v3.yaml); a file finishing stage N is queued straight into
 stage N+1 (if it's also selected this run) instead of waiting for the whole
-shard to finish stage N first. Manifest shards are still processed one at a
-time, in order -- only the stages within one shard overlap.
+shard to finish stage N first.
+
+Manifest shards are pipelined too: the first stage opens the next shard as soon
+as its own queue runs low, so it never idles waiting for a slower downstream
+stage, and once its input is exhausted its whole actor pool is released (GPUs
+and slots handed back) while the downstream stages keep draining.
 
 Usage:
     # both stages, streamed together:
@@ -43,7 +47,7 @@ import ray
 import logger
 import pipeline_v2_ray.actors  # noqa: F401 -- importing the package registers v2_stage_1/v2_stage_2
 from pipeline_v3.config import load_pipeline_v3_config
-from pipeline_v3.driver import MultiStagePipelineRunner
+from pipeline_v3.driver import MultiStagePipelineRunner, StageTotals
 from pipeline_v3.stages import STAGE_REGISTRY
 from pipeline_v3.types import FileItem
 from utils.tool import get_audio_files
@@ -198,43 +202,44 @@ def main() -> None:
     ray.init(address=args.address, ignore_reinit_error=True,
              runtime_env={"env_vars": worker_env_vars})
 
+    def seed_from_disk(shard_name: str) -> dict[str, list[FileItem]]:
+        """Extra seed for the selected NON-first stages of one shard, read from
+        their own upstream stage's already-flushed parquet.
+
+        Covers resuming a multi-stage run where an earlier stage got ahead (and
+        flushed to disk) before a crash, ahead of this run's live streaming
+        hand-off (in MultiStagePipelineRunner.run).
+        """
+        seed_items: dict[str, list[FileItem]] = {}
+        for key in selected[1:]:
+            prev_key = upstream_of.get(key)
+            if prev_key is None:
+                continue
+            disk_groups = STAGE_REGISTRY[prev_key].load_output_from_disk(
+                args.output, shard_names=[shard_name]
+            )
+            for g_shard, g_items in disk_groups:
+                if g_shard == shard_name and g_items:
+                    seed_items[key] = g_items
+        return seed_items
+
     runner = MultiStagePipelineRunner(stage_cfgs)
-    all_results: dict[str, list] = {k: [] for k in selected}
+    totals: dict[str, StageTotals] = {}
     try:
         runner.start()
-        # Process manifest shards strictly in order: each shard's selected
-        # stages are all fully drained (and flushed) before the next shard
-        # begins; within one shard, the selected stages run concurrently.
-        for shard_name, items in groups:
-            seed_items: dict[str, list[FileItem]] = {first_stage: items}
-            # Seed every OTHER selected, non-first stage from its own
-            # upstream stage's disk output for THIS shard too -- covers
-            # resuming a multi-stage run where an earlier stage got ahead
-            # (and flushed to disk) before a crash, before this run's live
-            # streaming hand-off (in MultiStagePipelineRunner.run_shard) had
-            # a chance to feed it.
-            for key in selected[1:]:
-                prev_key = upstream_of.get(key)
-                if prev_key is None:
-                    continue
-                disk_groups = STAGE_REGISTRY[prev_key].load_output_from_disk(
-                    args.output, shard_names=[shard_name]
-                )
-                for g_shard, g_items in disk_groups:
-                    if g_shard == shard_name and g_items:
-                        seed_items[key] = g_items
-            shard_results = runner.run_shard(shard_name, args.output, seed_items)
-            for key, results in shard_results.items():
-                all_results[key].extend(results)
+        # Shards are pipelined: the first stage opens the next manifest shard as
+        # soon as its own queue runs low, without waiting for the downstream
+        # stages to drain the previous one, and its actor pool is released as
+        # soon as its input is exhausted.
+        totals = runner.run(groups, args.output, seed_from_disk)
     finally:
         runner.shutdown()
         ray.shutdown()
 
-    for key, results in all_results.items():
-        n_ok = sum(1 for r in results if r.success)
+    for key, tot in totals.items():
         logger.info(
-            f"ray_v3_driver_done stage {key} files {len(results)} success {n_ok} "
-            f"failed {len(results) - n_ok}"
+            f"ray_v3_driver_done stage {key} files {tot.files} success {tot.ok} "
+            f"failed {tot.failed}"
         )
 
 

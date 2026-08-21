@@ -54,6 +54,9 @@ class ActorPool:
     def __init__(self, stage_cfg: StageRuntimeConfig) -> None:
         self.stage_cfg = stage_cfg
         self.actors: list[Actor] = []
+        # Set once this stage can never receive work again (see retire_all).
+        # Latches the pool at zero so reconcile() won't regrow it.
+        self.finished: bool = False
 
     def cluster_slots(self) -> int:
         """Current total of this stage's custom resource across all live
@@ -83,6 +86,8 @@ class ActorPool:
     def reconcile(self) -> None:
         """Grow or shrink the accepting-actor count toward this stage's
         current resource total. Shrink is graceful: surplus actors drain."""
+        if self.finished:
+            return  # stage is done for good; never respawn into an idle pool
         target = self.cluster_slots()
         accepting = self.alive()
         if target > len(accepting):
@@ -115,12 +120,27 @@ class ActorPool:
             )
         self.reconcile()
 
-    def shutdown(self) -> None:
-        """Retire every actor. Call once after all shards (or in a finally on
-        abort). Idempotent."""
+    def retire_all(self) -> int:
+        """Kill every actor NOW and latch the pool closed; returns how many
+        were killed.
+
+        For a stage whose input is provably exhausted: an idle pool still
+        holds its GPU fraction and its `slot_*` reservation, and the platform
+        reclaims long-idle resources anyway -- so release them deliberately
+        instead of letting a zero-load pool sit there. `finished` keeps
+        reconcile() from growing it back on the next cluster poll. Idempotent.
+        """
+        self.finished = True
+        n = len(self.actors)
         for actor in self.actors:
             try:
                 self.retire(actor)
             except Exception:  # noqa: BLE001
                 pass
         self.actors.clear()
+        return n
+
+    def shutdown(self) -> None:
+        """Retire every actor. Call once after all shards (or in a finally on
+        abort). Idempotent."""
+        self.retire_all()
