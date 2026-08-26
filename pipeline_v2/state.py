@@ -26,6 +26,17 @@ PIPELINE_VERSION = "v2"
 # either importing the other.
 ASR_ACCESS_FAILED_MARKER = "asr_access_failed"
 
+# Marker embedded in the `error` column of the single sentinel row emitted when
+# a file was processed successfully but yielded ZERO segments (VAD/segmenter
+# found nothing usable). Without such a row the file leaves no trace in
+# segments_part parquet at all, so `resume_state` never sees it as done and
+# every rerun reprocesses it forever -- a non-converging resume loop.
+# It is NOT a failure: the `error` column is reused purely so the row is
+# skipped by the stage-1 -> stage-2 hand-off (which drops any row with a
+# non-null error) and is easy to exclude from segment statistics
+# (`WHERE error IS NULL`) without widening the schema.
+NO_SEGMENTS_MARKER = "no_segments"
+
 
 class SegmentRecord(TypedDict):
     """One flat row of segments_part parquet (mirrors SEGMENT_SCHEMA in

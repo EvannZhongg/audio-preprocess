@@ -31,10 +31,11 @@ from logger import make_extra_tags
 from pipeline_v2.params import Stage2Params
 from pipeline_v2.stage2.models import load_stage2_models
 from pipeline_v2.stage2.runner import run_stage2_asr, run_stage2_postprocess
-from pipeline_v2.state import PIPELINE_VERSION
+from pipeline_v2.state import NO_SEGMENTS_MARKER, PIPELINE_VERSION
 from pipeline_v2_ray.actors.base import PipelineActor, register_actor
 from pipeline_v2_ray.config import RayConfig
 from pipeline_v2_ray.result import FileResult
+from pipeline_v2_ray.stage2_segments import error_record2
 
 
 def _setup_env() -> None:
@@ -154,7 +155,15 @@ class Stage2Actor(PipelineActor):
             logger.error(f"ray_stage2_writeback_failed {type(e).__name__}: {e}", extra=log_tag)
 
         return FileResult(
-            audio_path, success=True, n_segments=len(records), segments=records,
+            audio_path, success=True, n_segments=len(records),
+            segments=records if records else [
+                # Same resume-loop guard as v2_stage_1: `zip(stage1_segments,
+                # asr_segments)` truncates to empty if the ASR pass returns
+                # nothing, and a chunk with no rows in stage2_segments parquet
+                # is indistinguishable from "never processed", so resume_state2
+                # would hand it back on every rerun forever.
+                error_record2(relative_path, shard, NO_SEGMENTS_MARKER)
+            ],
         ).to_dict()
 
     @staticmethod

@@ -32,10 +32,12 @@ import torch
 import logger
 from logger import make_extra_tags
 from pipeline_v2.pipeline import PipelineV2
-from pipeline_v2.state import PIPELINE_VERSION, PipelineState
+from pipeline_v2.state import (NO_SEGMENTS_MARKER, PIPELINE_VERSION,
+                               PipelineState)
 from pipeline_v2_ray.actors.base import PipelineActor, register_actor
 from pipeline_v2_ray.config import RayConfig
 from pipeline_v2_ray.result import FileResult
+from pipeline_v2_ray.segments import error_record
 
 
 def _setup_env() -> None:
@@ -138,9 +140,21 @@ class GpuPipelineActor(PipelineActor):
             # file has no recorded segments -> resume reprocesses it on rerun; any
             # partial wav/json already on disk are harmless orphans, overwritten on
             # the deterministic-id rerun. Failures are surfaced via logs, not a table.
+            out_records = records if success else []
+            if success and not out_records:
+                # Processed fine but produced zero segments (VAD/segmenter found
+                # nothing). Emit ONE sentinel row so this source appears in
+                # segments_part parquet: the parquet IS the resume checkpoint, so
+                # a file with no rows at all is indistinguishable from "never
+                # processed" and every rerun would redo it forever (and a shard
+                # made up entirely of such files would flush no parquet at all,
+                # resetting that whole shard's resume state). Applies to both the
+                # pipeline_v2_ray and pipeline_v3 drivers, which share this actor.
+                out_records = [error_record(relative_path, shard, NO_SEGMENTS_MARKER)]
+                logger.info(f"ray_zero_segments file {relative_path}", extra=log_tag)
             return FileResult(
                 audio_path, success=success, n_segments=n_segments,
-                error=error, segments=records if success else [],
+                error=error, segments=out_records,
             ).to_dict()
         finally:
             # Reclaim this file's cached GPU blocks (mirrors PipelineV2.run's
