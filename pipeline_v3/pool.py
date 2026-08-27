@@ -16,6 +16,7 @@ independently.
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass, field
 
 import ray
@@ -35,11 +36,33 @@ class Actor:
     files_submitted: int = 0
     born_at: float = field(default_factory=time.time)
     draining: bool = False   # no new work; retire once inflight empties
+    # Stable short identity. This dataclass is mutable and therefore
+    # unhashable, so anything keyed per actor (see pipeline_v3.health) keys on
+    # `uid` instead of the object.
+    uid: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    # Where this actor runs; filled in lazily by ActorPool.poll_node_info()
+    # once `node_ref` resolves. Needed so slow-node alerts can name the
+    # machine instead of an opaque actor id.
+    node_ip: str = ""
+    node_id: str = ""
+    hostname: str = ""
+    pid: int = 0
+    # Pending PipelineActor.node_info() ObjectRef, or None once resolved/given
+    # up on. Typed loosely to keep this dataclass ray-generic.
+    node_ref: object = None
 
     def needs_recycle(self, max_files: int, max_age: int) -> bool:
         return (
             self.files_submitted >= max_files
             or (time.time() - self.born_at) >= max_age
+        )
+
+    def describe(self) -> str:
+        """Fixed-shape identity for log lines: keeps `node ... host ... pid
+        ... actor ...` greppable even before node info has resolved."""
+        return (
+            f"node {self.node_ip or '?'} host {self.hostname or '?'} "
+            f"pid {self.pid or 0} actor {self.uid}"
         )
 
 
@@ -70,7 +93,53 @@ class ActorPool:
             slot_resource=self.stage_cfg.resource_name,
             max_concurrency=self.stage_cfg.ray_config.defaults.max_concurrency,
         )
-        return Actor(handle=handle)
+        actor = Actor(handle=handle)
+        # Fire-and-forget: ask the actor where it lives BEFORE it is given any
+        # work, so the call sits right behind its (slow, model-loading)
+        # __init__ instead of behind a queue of process_file calls. Never
+        # waited on here -- poll_node_info() collects it later.
+        try:
+            actor.node_ref = handle.node_info.remote()
+        except Exception as e:  # noqa: BLE001 - identity is a nice-to-have
+            logger.warning(f"ray_v3_node_info_skip stage {self.stage_cfg.key} err {e}")
+        return actor
+
+    def poll_node_info(self) -> None:
+        """Non-blockingly collect any node_info() results that have arrived.
+
+        MUST NOT block: an actor's __init__ loads models for minutes, so
+        `ray.get` here would stall the driver's whole scheduling loop. Uses a
+        zero timeout and only reads refs that are already ready."""
+        waiting = [a for a in self.actors if a.node_ref is not None]
+        if not waiting:
+            return
+        by_ref = {a.node_ref: a for a in waiting}
+        try:
+            ready, _ = ray.wait(list(by_ref), num_returns=len(by_ref), timeout=0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"ray_v3_node_info_skip stage {self.stage_cfg.key} err {e}")
+            return
+        for ref in ready:
+            actor = by_ref[ref]
+            actor.node_ref = None   # resolved (or given up on): ask only once
+            try:
+                info = ray.get(ref)
+            except Exception as e:  # noqa: BLE001 - actor may have died meanwhile
+                logger.warning(
+                    f"ray_v3_node_info_failed stage {self.stage_cfg.key} "
+                    f"actor {actor.uid} err {e}"
+                )
+                continue
+            actor.node_ip = info.get("node_ip", "") or ""
+            actor.node_id = info.get("node_id", "") or ""
+            actor.hostname = info.get("hostname", "") or ""
+            actor.pid = int(info.get("pid", 0) or 0)
+            # Logged once per actor so the actor-uid -> machine mapping used by
+            # every later health alert is itself in the log.
+            logger.info(
+                f"ray_v3_actor_node stage {self.stage_cfg.key} {actor.describe()} "
+                f"node_id {actor.node_id}"
+            )
 
     def alive(self) -> list[Actor]:
         """Actors still accepting work (not draining)."""

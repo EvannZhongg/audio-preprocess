@@ -29,6 +29,37 @@ class PipelineActor(ABC):
         stage 2 uses it to carry the stage-1 segments being re-processed."""
         ...
 
+    def node_info(self) -> dict:
+        """Where this actor actually runs. Concrete (not abstract) on purpose:
+        every actor inherits it, and Ray exposes inherited public methods as
+        remote methods, so no actor implementation has to care.
+
+        The driver has no other way to name the machine behind an actor
+        handle, and a slow-node alert that cannot say WHICH host it is about
+        is not actionable (see pipeline_v3/health.py). Called once per actor,
+        right after it is spawned.
+
+        Imports are inside the body so this module stays dependency-light at
+        import time (it is imported by the CLI just to read ACTOR_REGISTRY).
+        Never raises: a partially-filled dict still beats losing the actor."""
+        info = {"node_ip": "", "node_id": "", "hostname": "", "pid": 0}
+        try:
+            import os
+            import socket
+
+            info["hostname"] = socket.gethostname()
+            info["pid"] = os.getpid()
+            try:
+                import ray
+
+                info["node_ip"] = ray.util.get_node_ip_address()
+                info["node_id"] = ray.get_runtime_context().get_node_id()
+            except Exception:  # noqa: BLE001 - fall back to plain DNS
+                info["node_ip"] = socket.gethostbyname(info["hostname"])
+        except Exception:  # noqa: BLE001
+            pass
+        return info
+
 
 # name -> registered actor class. Populated by @register_actor as actor modules
 # are imported (self-registration), so base holds no concrete-actor references.

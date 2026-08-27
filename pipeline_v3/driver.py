@@ -36,6 +36,15 @@ output directories are per shard. A (stage, shard) pair is closed out --
 flushed and logged as `ray_v3_shard_done` -- as soon as it has no pending or
 in-flight work AND its upstream stage's same shard is already closed (i.e.
 nothing can stream in anymore).
+
+Because the cluster is heterogeneous and elastic, one machine can be healthy
+enough to keep its actor alive while running an order of magnitude slower than
+its peers (resource-starved host: memory pressure, cgroup CPU throttling, a
+noisy neighbour). The driver therefore times every submission and hands it to
+pipeline_v3.health.SlowActorDetector, which every HEALTH_INTERVAL names the
+offending machine in the log (`ray_v3_slow_actor` / `ray_v3_actor_stalled`,
+with a `ray_v3_actor_rtf` spread line). That is monitoring ONLY -- it never
+drains or reschedules anything, precisely so the sick node stays inspectable.
 """
 from __future__ import annotations
 
@@ -51,6 +60,7 @@ from ray.exceptions import RayActorError
 import logger
 from pipeline_v2_ray.result import FileResult
 from pipeline_v3.config import StageRuntimeConfig
+from pipeline_v3.health import HEALTH_INTERVAL, SlowActorDetector
 from pipeline_v3.pool import Actor, ActorPool
 from pipeline_v3.stages import STAGE_REGISTRY, StageDef
 from pipeline_v3.types import FileItem
@@ -60,6 +70,8 @@ WAIT_TIMEOUT = 5.0          # ray.wait poll timeout; also bounds reconcile laten
 PROGRESS_INTERVAL = 30.0    # seconds between progress/throughput log lines, per (stage, shard)
 FLUSH_INTERVAL = 300.0      # seconds between time-based segment flushes, per (stage, shard)
 BACKLOG_INTERVAL = 60.0     # seconds between cross-stage queue-depth log lines
+# HEALTH_INTERVAL (seconds between slow-actor detection passes) is owned by
+# pipeline_v3.health, next to the thresholds it is tuned against.
 
 __all__ = ["MultiStagePipelineRunner", "StageTotals"]
 
@@ -129,6 +141,10 @@ class MultiStagePipelineRunner:
             if sdef.next_stage
         }
         self._last_reconcile = 0.0
+        # Log-only watchdog: names the machine whose actor throughput has
+        # fallen an order of magnitude behind its stage's median, early enough
+        # to inspect it before the platform reclaims the "low load" task.
+        self._health = SlowActorDetector(self._order)
 
     def start(self) -> None:
         for pool in self._pools.values():
@@ -175,6 +191,7 @@ class MultiStagePipelineRunner:
         ref_index: dict[ray.ObjectRef, tuple[str, str]] = {}  # ObjectRef -> (stage_key, shard)
         totals = {key: StageTotals() for key in self._order}
         last_backlog = time.time()
+        last_health = time.time()
 
         def open_shard() -> None:
             """Create every selected stage's state for the next shard."""
@@ -250,6 +267,7 @@ class MultiStagePipelineRunner:
                         actor.files_submitted += 1
                         st.ref_owner[ref] = actor
                         ref_index[ref] = (key, st.shard)
+                        self._health.on_submit(key, actor, ref, item.duration)
 
         def flush(st: _StageShardState) -> None:
             st.last_flush = time.time()
@@ -319,6 +337,15 @@ class MultiStagePipelineRunner:
             if now - last_backlog >= BACKLOG_INTERVAL:
                 self._log_backlog(states, open_shards, len(unopened))
                 last_backlog = now
+            if now - last_health >= HEALTH_INTERVAL:
+                # Order matters: collect any newly-resolved node identities
+                # first (so alerts can name the machine), drop departed actors
+                # so they neither leak nor skew the median, then judge.
+                for pool in self._pools.values():
+                    pool.poll_node_info()
+                self._health.sweep(self._pools)
+                self._health.check(self._pools)
+                last_health = now
 
             if not ref_index:
                 if not unopened and not states:
@@ -350,6 +377,7 @@ class MultiStagePipelineRunner:
                     f"ray_v3_actor_crash stage {key} shard {shard} file {path} err {e}"
                 )
                 self._record_failure(st, totals[key], item, f"actor crashed: {e}")
+                self._health.on_drop(ref)
                 for lost_ref, lost_item in list(actor.inflight.items()):
                     lost_key, lost_shard = ref_index.pop(lost_ref, (key, shard))
                     lost_st = states.get((lost_key, lost_shard))
@@ -359,6 +387,11 @@ class MultiStagePipelineRunner:
                     self._record_failure(
                         lost_st, totals[lost_key], lost_item, "actor crashed"
                     )
+                # Timing samples die with the actor: these files never
+                # returned, so they must not be timed (and sweep() would only
+                # collect them after the pool drops the actor below).
+                for lost_ref in list(actor.inflight):
+                    self._health.on_drop(lost_ref)
                 actor.inflight.clear()
                 st.pool.drop(actor)
                 continue
@@ -370,8 +403,10 @@ class MultiStagePipelineRunner:
                     f"err {type(e).__name__}: {e}"
                 )
                 self._record_failure(st, totals[key], item, f"task error: {e}")
+                self._health.on_drop(ref)
                 continue
 
+            self._health.on_done(ref, fr.success)
             self._log_result(key, fr)
             totals[key].files += 1
             st.prog.n_done += 1
