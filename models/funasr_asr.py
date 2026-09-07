@@ -17,6 +17,50 @@ from modelscope.utils.constant import Tasks
 
 logger = logging.getLogger(__name__)
 
+# Fun-ASR-MLT-Nano-2512's `generate(language=...)` does NOT take an ISO code
+# or "auto" (its official usage example only ever shows a literal Chinese
+# language name, e.g. language="中文"). Passing "auto" is undocumented and,
+# for lower-resource languages in its 31-language set (e.g. Vietnamese), it
+# has been observed to silently collapse to Chinese/Cantonese decoding
+# instead of actually auto-detecting. So for this model we must map our ISO
+# code to the name it expects; "auto" is kept only as a last-resort fallback
+# for languages not in this table (behavior unchanged from before).
+FUNASR_NANO_LANGUAGE_MAP = {
+    "zh": "中文",
+    "en": "英文",
+    "yue": "粤语",
+    "ja": "日文",
+    "ko": "韩文",
+    "vi": "越南语",
+    "id": "印尼语",
+    "th": "泰语",
+    "ms": "马来语",
+    "tl": "菲律宾语",
+    "fil": "菲律宾语",
+    "ar": "阿拉伯语",
+    "hi": "印地语",
+    "bg": "保加利亚语",
+    "hr": "克罗地亚语",
+    "cs": "捷克语",
+    "da": "丹麦语",
+    "nl": "荷兰语",
+    "et": "爱沙尼亚语",
+    "fi": "芬兰语",
+    "el": "希腊语",
+    "hu": "匈牙利语",
+    "ga": "爱尔兰语",
+    "lv": "拉脱维亚语",
+    "lt": "立陶宛语",
+    "mt": "马耳他语",
+    "pl": "波兰语",
+    "pt": "葡萄牙语",
+    "ro": "罗马尼亚语",
+    "sk": "斯洛伐克语",
+    "sl": "斯洛文尼亚语",
+    "sv": "瑞典语",
+}
+
+
 class FunASR:
     """
     ASR class using FunASR models (Optimized for Memory Stability).
@@ -97,7 +141,7 @@ class FunASR:
     def detect_language(self, audio: np.ndarray):
         return None, 0.0
 
-    def batch_recognize_via_tempfile(self, audio: np.ndarray, vad_segments: List[dict], sample_rate: int = 16000):
+    def batch_recognize_via_tempfile(self, audio: np.ndarray, vad_segments: List[dict], sample_rate: int = 16000, language: str = "auto"):
         """
         Batch transcribe with explicit chunking and memory cleanup.
         Uses LARGE_TEMP_DIR env var if set to avoid /tmp overflow.
@@ -159,6 +203,10 @@ class FunASR:
                             batch_results_chunk = res if isinstance(res, list) else [res]
                             
                         elif self.asr_model == "SenseVoice":
+                            # SenseVoice's official API documents "auto" as a
+                            # valid value (it truly auto-detects among its
+                            # zh/en/ja/ko/yue support set), so no mapping
+                            # needed here.
                             res = self.model.generate(
                                 input=batch_paths,
                                 language="auto",
@@ -169,9 +217,13 @@ class FunASR:
                             batch_results_chunk = res if isinstance(res, list) else [res]
 
                         elif self.asr_model == "FunASRNano":
+                            # Map our ISO code to the Chinese language name
+                            # this model's `generate()` actually expects; see
+                            # FUNASR_NANO_LANGUAGE_MAP for why "auto" is unsafe.
+                            nano_language = FUNASR_NANO_LANGUAGE_MAP.get(language, "auto")
                             res = self.model.generate(
                                 input=batch_paths,
-                                language="auto",
+                                language=nano_language,
                                 itn=True,
                                 batch_size_s=0,
                                 batch_size=len(batch_paths)
@@ -212,13 +264,14 @@ class FunASR:
         audio: np.ndarray,
         vad_segments: List[dict],
         print_progress: bool = False,
+        language: str = "auto",
         **kwargs
     ) -> dict:
         if not vad_segments: 
             return {"segments": [], "language": "unknown"}
         
         self._clear_memory()
-        batch_result = self.batch_recognize_via_tempfile(audio, vad_segments)
+        batch_result = self.batch_recognize_via_tempfile(audio, vad_segments, language=language)
         
         segments = []
         for res, segment_info in zip(batch_result, vad_segments):
