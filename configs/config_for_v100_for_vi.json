@@ -13,7 +13,7 @@
         ]
     },
     "asr_provider": "qwen3_asr",
-    "validation_asr_provider": "whisper",
+    "validation_asr_provider": "chunkformer",
     "stage2_asr_provider": "qwen3_asr",
     "asr_validation": {
         "enable": true,
