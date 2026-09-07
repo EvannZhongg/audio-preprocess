@@ -194,9 +194,10 @@ def load_stage2_models(params: Stage2Params, logger=None) -> Stage2Models:
     # by the legacy top-level `asr_validation.enable` / `validation_asr_provider`
     # keys (unchanged, already present in the shared config jsons). Loaded
     # via v1's own `load_asr_model` factory rather than stage 2's lightweight
-    # whisper/qwen3_asr-only `_load_asr_model`, so all six v1 providers
-    # (gemini/funasr/funasr_nano/paraformer/whisper/qwen3_asr) are usable for
-    # validation regardless of which primary ASR stage 2 is running.
+    # whisper/qwen3_asr-only `_load_asr_model`, so all seven v1 providers
+    # (gemini/funasr/funasr_nano/paraformer/whisper/qwen3_asr/chunkformer)
+    # are usable for validation regardless of which primary ASR stage 2 is
+    # running.
     validation_asr_model = None
     val_cfg = params.asr_validation or {}
     if val_cfg.get("enable", False):

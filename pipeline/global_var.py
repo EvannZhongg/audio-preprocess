@@ -49,8 +49,8 @@ if not hasattr(_ta, "set_audio_backend"):
 
 from pyannote.audio import Pipeline
 
-from models import (brouhaha_metrics, dnsmos, funasr_asr, separate_fast,
-                    smru_separate, vad, whisper_asr)
+from models import (brouhaha_metrics, chunkformer_asr, dnsmos, funasr_asr,
+                    separate_fast, smru_separate, vad, whisper_asr)
 from models.eres2net.ERes2NetV2 import ERes2NetV2
 from models.eres2net.features import FBank
 from utils.logger import Logger
@@ -215,6 +215,19 @@ def load_asr_model(cfg, asr_provider, device_name, cli_args):
             model_path = model_path,  device=device_name, threads=cli_args.threads,
             compute_type=whisper_compute_type,
             asr_options={"initial_prompt": "Um, Uh, Ah. Like, you know. I mean, right. Actually. Basically, and right? okay. Alright. Emm. So. Oh. 生于忧患,死于安乐。岂不快哉?当然,嗯,呃,就,这样,那个,哪个,啊,呀,哎呀,哎哟,唉哇,啧,唷,哟,噫!微斯人,吾谁与归?ええと、あの、ま、そう、ええ。äh, hm, so, tja, halt, eigentlich. euh, quoi, bah, ben, tu vois, tu sais, t'sais, eh bien, du coup. genre, comme, style. 응,어,그,음."}
+        )
+
+    elif asr_provider == "chunkformer":
+        if "chunkformer" not in cfg:
+            raise ValueError("chunkformer configuration not found in config.json")
+        cf_model = cfg["chunkformer"].get("model", "khanhld/chunkformer-ctc-large-vie")
+        cf_model_dir_cache = cfg["chunkformer"].get("model_dir_cache", "")
+        if cf_model_dir_cache and os.path.exists(cf_model_dir_cache):
+            cf_model_dir = cf_model_dir_cache
+        else:
+            cf_model_dir = cf_model
+        asr_model = chunkformer_asr.load_asr_model(
+            model_dir=cf_model_dir, device=device_name
         )
 
     elif asr_provider == "qwen3_asr":
