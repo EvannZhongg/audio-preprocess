@@ -49,6 +49,22 @@ RUN echo "source activate AudioPipeline" >> ~/.bashrc
 RUN conda run -n AudioPipeline python -m pip install ray==2.48.0
 RUN conda run -n AudioPipeline python -m pip install -r requirements.txt
 RUN conda run -n AudioPipeline python -m pip install onnxruntime-gpu==1.19.2
+# CUDA 11 runtime libs required by CTranslate2 (faster-whisper GPU inference).
+# The ctranslate2 wheel resolved by faster-whisper is a CUDA 11/cuDNN 8 build,
+# but this image is CUDA 12.1 -- at the first whisper forward pass CTranslate2
+# dlopens libcudnn_ops_infer.so.8 / libcublasLt.so.11 and SIGABRTs the whole
+# actor when they are missing. Install the cu11 pip packages, symlink their
+# libs into /usr/lib64 + ldconfig (survives regardless of env inheritance for
+# pre-started Ray clusters), and export LD_LIBRARY_PATH as belt-and-braces.
+RUN conda run -n AudioPipeline python -m pip install \
+    nvidia-cudnn-cu11==8.9.6.50 nvidia-cublas-cu11 nvidia-cuda-runtime-cu11
+RUN SITE=$(conda run -n AudioPipeline python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])') && \
+    for d in "$SITE"/nvidia/cudnn/lib "$SITE"/nvidia/cublas/lib "$SITE"/nvidia/cuda_runtime/lib; do \
+        for f in "$d"/lib*.so*; do ln -sf "$(readlink -f "$f")" /usr/lib64/; done; \
+    done && \
+    ldconfig && \
+    test "$(ldconfig -p | grep -c libcudnn_ops_infer.so.8)" -ge 1
+ENV LD_LIBRARY_PATH="/opt/conda/envs/AudioPipeline/lib/python3.9/site-packages/nvidia/cudnn/lib:/opt/conda/envs/AudioPipeline/lib/python3.9/site-packages/nvidia/cublas/lib:/opt/conda/envs/AudioPipeline/lib/python3.9/site-packages/nvidia/cuda_runtime/lib:$LD_LIBRARY_PATH"
 RUN conda run -n AudioPipeline python main.py --prepare_env 1 --config_path ./configs/config_for_v100_for_russian.json
 # Pre-download ASR models needed by other languages' validation_asr_provider:
 #   - paraformer (used by zh validation)
@@ -65,6 +81,10 @@ RUN conda run -n AudioPipeline python scripts/download_qwen3_06b.py
 # languages (~7-8 GB total). Without this, alignment_score is -1
 # everywhere because workers can't reach HuggingFace.
 RUN conda run -n AudioPipeline python scripts/download_whisperx_align.py
+# Pre-download the Vietnamese ChunkFormer validation ASR model (worker nodes
+# have no outbound network, same rationale as the steps above). Consumed via
+# validation_asr_provider="chunkformer" in config_for_v100_for_vi.json.
+RUN conda run -n AudioPipeline python -c "from chunkformer import ChunkFormerModel; ChunkFormerModel.from_pretrained('khanhld/chunkformer-ctc-large-vie')"
 # Convert pytorch_model.bin → model.safetensors so transformers loads
 # them on torch 2.5 (CVE-2025-32434 blocks .bin loading otherwise).
 RUN conda run -n AudioPipeline python scripts/convert_bin_to_safetensors.py \
