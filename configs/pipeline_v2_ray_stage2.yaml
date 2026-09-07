@@ -19,7 +19,7 @@ defaults:
 hardware:
   v100:
     match: "V100"
-    pipeline_config: configs/config_for_v100_for_ko.json
+    pipeline_config: configs/config_for_v100_for_vi.json
 
   # NOTE: must be listed (and thus matched) BEFORE "a10" below, since
   # match_profile() does a substring test and "a10" is itself a substring of
