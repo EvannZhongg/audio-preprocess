@@ -1,0 +1,10 @@
+__pycache__/
+*.log
+audio/
+.__trpc.lock
+ft_local/
+podcast-processed-data/
+examples/
+logs/
+processed_data/
+iic/

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS 数据处理工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TTS 数据处理工具 🎧</h1>
+            <p class="subtitle">
+                上传您的原始音频，管线将自动处理，生成可用于训练的高质量 TTS 数据集。
+            </p>
+        </header>
+
+        <main>
+            <!-- Step 1: Upload -->
+            <section id="upload-section" class="card">
+                <h2>第一步: 上传音频文件 📤</h2>
+                <p>请将一个或多个音频文件拖拽到下方区域，或点击选择。单次上传文件总大小请勿超过 1GB。</p>
+                <div id="drop-zone">
+                    <input type="file" id="file-input" multiple hidden>
+                    <p>拖拽文件到这里或 <strong>点击浏览</strong></p>
+                </div>
+                <div id="file-list"></div>
+                <button id="process-btn" class="btn-primary" disabled>开始处理</button>
+            </section>
+
+            <!-- Step 2: Processing Status -->
+            <section id="status-section" class="card" style="display: none;">
+                <h2>第二步: 处理状态 🔄</h2>
+                <div class="status-container">
+                    <div id="spinner" class="spinner"></div>
+                    <p id="status-message">您的文件正在被处理，请稍候...</p>
+                </div>
+                <div id="progress-container">
+                    <div class="progress-bar-wrapper">
+                        <div id="progress-bar" style="width: 0%;"></div>
+                    </div>
+                    <div id="progress-text">0%</div>
+                </div>
+                <p id="step-name" class="step-name-text"></p>
+            </section>
+
+            <!-- Step 3: Results -->
+            <section id="results-section" class="card" style="display: none;">
+                <h2>第三步: 结果预览 📊</h2>
+                <div class="results-summary">
+                    <p><strong>数据总时长留存率:</strong> <span id="retention-rate">计算中...</span></p>
+                    <p>下方将展示最多5位说话人，每位最多5条音频片段的预览结果。</p>
+                </div>
+                <div id="results-display">
+                    <!-- Results will be dynamically inserted here -->
+                </div>
+                <button id="download-btn" class="btn-secondary">下载完整数据集 (.zip)</button>
+            </section>
+        </main>
+        
+        <footer>
+            <p>内部体验版</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

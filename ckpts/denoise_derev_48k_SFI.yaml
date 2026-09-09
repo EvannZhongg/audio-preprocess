@@ -1,0 +1,15 @@
+feat_cfg:
+  n_fft: 1536
+  hop_length: 384
+  segment: 1
+  sr: 48000
+  stft_window: 'hann'
+
+model_cfg:
+  ppFlag: 1
+  num_repeat: 6
+  input_feat_dim: 2
+  feat_emb_dim: 192
+
+ckpt_path: 2task_48k_lessmusic__addrir_5merged.pt
+# ckpt_path: /workspace/my_folder2/bobbsun/Emilia/ckpts/2task_48k_lessmusic__addrir_5merged.pt

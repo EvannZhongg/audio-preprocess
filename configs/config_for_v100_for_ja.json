@@ -1,0 +1,208 @@
+{
+    "language": {
+        "multilingual": true,
+        "supported": [
+            "zh",
+            "en",
+            "fr",
+            "ja",
+            "ko",
+            "de",
+            "ru"
+        ]
+    },
+    "asr_provider": "qwen3_asr",
+    "validation_asr_provider": "funasr",
+    "asr_validation": {
+        "enable": true,
+        "wer_threshold": 0.4,
+        "language": "ja"
+    },
+    "qwen3_asr": {
+        "namespace": "Test",
+        "service": "audio_process_qwen3_asr_service",
+        "model_name": "Qwen/Qwen3-ASR-1.7B",
+        "hot_words": ""
+    },
+    "funasr_nano": {
+        "model": "FunAudioLLM/Fun-ASR-MLT-Nano-2512",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/FunAudioLLM/Fun-ASR-MLT-Nano-2512",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "batch_size": 16
+    },
+    "funasr": {
+        "model": "iic/SenseVoiceSmall",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+    },
+    "paraformer": {
+        "model": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "model_revision": "v2.0.4",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "batch_size": 256
+    },
+    "whisper":{
+        "model": "h2oai/faster-whisper-large-v3-turbo",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--h2oai--faster-whisper-large-v3-turbo/snapshots/0d50161d23807098c6b7ed53bbb70c7ce02702b9"
+    },
+    "diarization_provider": "pyannote",
+    "pyannote": {
+        "model": "pyannote/speaker-diarization-3.1",
+        "model_dir_cache": "ckpts/pyannote_config_v2.yaml"
+    },
+    "gemini": {
+        "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
+        "model": "gemini-2.5-flash"
+    },
+    "embedding_refinement": {
+        "enable": true,
+        "eres2net_model_path": "ckpts/pretrained_eres2netv2.ckpt"
+    },
+    "3d-speaker": {
+        "model_id": "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
+    },
+    "entrypoint": {
+        "input_folder_path": "examples",
+        "SAMPLE_RATE": 24000
+    },
+    "speaker_diarization": {
+        "local_model_path": "/path/to/models/pyannote/speaker-diarization-3.1",
+        "model_id": "damo/speech_diarization_telelspeech_16k_meeting"
+    },
+    "separate": {
+        "enable": true,
+        "provider": "smru",
+        "uvr": {
+            "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
+            "margin": 44100,
+            "chunks": 20,
+            "denoise": true,
+            "dim_f": 3072,
+            "dim_t": 8,
+            "n_fft": 7680
+        },
+        "smru": {
+            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "chunk_size": 10,
+            "valid_size": 8,
+            "overlap": 2,
+            "batch_size": 7
+        }
+    },
+    "strategy_parameters": {
+        "merge_gap": 0.55,
+        "min_segment_length": 1.5,
+        "max_segment_length": 30.0,
+        "strategy": "fixed",
+        "fixed_dnsmos_threshold": 2.8,
+        "fixed_c50_threshold": 40.0,
+        "fixed_snr_threshold": 30.0,
+        "min_duration": 2.0,
+        "max_duration": 30.0,
+        "lower_bound_percent": 10,
+        "upper_bound_percent": 90,
+        "min_char_count": 2.0,
+        "inter_similarity_threshold": 0.5,
+        "intra_similarity_threshold": 0.68,
+        "refinement_batch_size": 256
+    },
+    "metrics": {
+        "dnsmos": {
+            "mos_model_path": "ckpts/sig_bak_ovr.onnx"
+        },
+        "use_brouhaha": true,
+        "brouhaha": {
+            "model": "pyannote/brouhaha",
+            "model_dir_cache": "/root/.cache/torch/pyannote/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin"
+        }
+    },
+    "mos_model": {
+        "primary_model_path": "ckpts/sig_bak_ovr.onnx"
+    },
+    "text_quality": {
+        "enable": false,
+        "ppl": {
+            "enable": true,
+            "model": "Qwen/Qwen3-0.6B",
+            "model_dir_cache": "/root/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca"
+        },
+        "spell": {
+            "enable": true
+        },
+        "llm": {
+            "enable": true,
+            "api_url": "http://v2.open.venus.oa.com/llmproxy/chat/completions",
+            "api_token": "Q3jOs0HJM5tQfJFIDxKvJzAl@4114",
+            "model_id": "server:272349",
+            "timeout": 30,
+            "concurrency": 16,
+            "max_retries": 2
+        },
+        "thresholds": {
+            "ppl_max": 1000,
+            "spell_min": 0.3,
+            "llm_quality_min": 5.0,
+            "semantic_min": 5.0,
+            "tts_min": 4.0
+        }
+    },
+    "domain_annotation": {
+        "enable": false,
+        "text_domain": {
+            "enable": true
+        },
+        "acoustic_domain": {
+            "enable": true,
+            "audio_sample_seconds": 30
+        },
+        "speaker_domain": {
+            "enable": true,
+            "audio_sample_seconds": 15
+        },
+        "llm": {
+            "api_url": "http://v2.open.venus.oa.com/llmproxy/chat/completions",
+            "api_token": "Q3jOs0HJM5tQfJFIDxKvJzAl@4114",
+            "model_id": "server:272349",
+            "timeout": 60,
+            "max_retries": 2
+        }
+    },
+    "speaking_rate": {
+        "enable": false,
+        "thresholds": {
+            "speaking_rate_min": 2.0,
+            "speaking_rate_max": 10.0
+        }
+    },
+    "silence_filter": {
+        "enable": true,
+        "min_silence_ms": 300,
+        "thresholds": {
+            "abnormal_silence_count_max": 1
+        }
+    },
+    "alignment": {
+        "enable": true,
+        "model_dir_cache": "/root/.cache/huggingface/hub",
+        "default_language": "ja",
+        "language_models": {
+            "zh": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-chinese-zh-cn",
+            "en": "/root/.cache/huggingface/hub/models--facebook--wav2vec2-base-960h",
+            "fr": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-french",
+            "ja": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-japanese",
+            "ko": "/root/.cache/huggingface/hub/models--kresnik--wav2vec2-large-xlsr-korean",
+            "de": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-german",
+            "ru": "/root/.cache/huggingface/hub/models--jonatasgrosman--wav2vec2-large-xlsr-53-russian"
+        },
+        "thresholds": {
+            "alignment_score_min": 0.55
+        }
+    },
+    "huggingface_token": "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"
+}

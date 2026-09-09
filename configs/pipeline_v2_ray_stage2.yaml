@@ -1,0 +1,34 @@
+# pipeline_v2_ray stage-2 hardware map (remote ASR + v1 post-processing).
+#
+# Same shape/rationale as configs/pipeline_v2_ray.yaml (see that file for the
+# full explanation of pipe_slot / max_concurrency / elastic reconcile) -- this
+# is the stage-2 counterpart: `main_v2_ray.py --stage1-output ... --actor
+# v2_stage_2 --ray-config configs/pipeline_v2_ray_stage2.yaml`.
+#
+# Each `pipeline_config` JSON here must carry the stage-2 sections consumed by
+# `Stage2Params.from_config`: qwen3_asr / domain_annotation / speaking_rate /
+# silence_filter / alignment / text_quality (see configs/config_for_v100_for_en.json
+# for a fully populated example). Hardware profiles are matched only to size
+# the local GPU-bound models (VAD/aligner/ppl); the ASR call itself is remote.
+
+defaults:
+  max_files_per_actor: 10000
+  max_age_seconds: 36000
+  max_concurrency: 4
+
+hardware:
+  v100:
+    match: "V100"
+    pipeline_config: configs/config_for_v100_for_vi.json
+
+  # NOTE: must be listed (and thus matched) BEFORE "a10" below, since
+  # match_profile() does a substring test and "a10" is itself a substring of
+  # "a100" -- reversing the order would make every A100 GPU incorrectly match
+  # the a10 profile (mirrors configs/pipeline_v2_ray.yaml).
+  a100:
+    match: "A100"
+    pipeline_config: configs/config_for_a100.json
+
+  a10:
+    match: "A10"
+    pipeline_config: configs/config_for_a10_for_en.json

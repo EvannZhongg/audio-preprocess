@@ -1,0 +1,117 @@
+{
+    "language": {
+        "multilingual": true,
+        "supported": [
+            "zh",
+            "en",
+            "fr",
+            "ja",
+            "ko",
+            "de"
+        ]
+    },
+    "asr_provider": "funasr",
+    "validation_asr_provider": "paraformer",
+    "asr_validation": {
+        "enable": true,
+        "wer_threshold": 0.15,
+        "language": "zh"
+    },
+    "funasr": {
+        "model": "iic/SenseVoiceSmall",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+    },
+    "paraformer": {
+        "model": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "model_revision": "v2.0.4",
+        "model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "punc_model": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "punc_model_dir_cache": "/root/.cache/modelscope/hub/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "batch_size": 256
+    },
+    "whisper":{
+        "model": "Systran/faster-distil-whisper-large-v3",
+        "model_dir_cache": "/root/.cache/huggingface/hub/models--Systran--faster-distil-whisper-large-v3/snapshots/c3058b475261292e64a0412df1d2681c06260fab",
+        "compute_type": "float16",
+        "batch_size": 8
+    },
+    "diarization_provider": "pyannote",
+    "pyannote": {
+        "model": "pyannote/speaker-diarization-3.1",
+        "model_dir_cache": "ckpts/pyannote_config.yaml"
+    },
+    "gemini": {
+        "api_key": "AIzaSyBrl_kQBASe9grr_BLGs67oDcfGYKAVpwU",
+        "model": "gemini-2.5-flash"
+    },
+    "embedding_refinement": {
+        "enable": true,
+        "eres2net_model_path": "ckpts/pretrained_eres2netv2.ckpt"
+    },
+    "3d-speaker": {
+        "model_id": "iic/speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common"
+    },
+    "entrypoint": {
+        "input_folder_path": "examples",
+        "SAMPLE_RATE": 24000
+    },
+    "speaker_diarization": {
+        "local_model_path": "/path/to/models/pyannote/speaker-diarization-3.1",
+        "model_id": "damo/speech_diarization_telelspeech_16k_meeting"
+    },
+    "separate": {
+        "enable": true,
+        "provider": "smru",
+        "uvr": {
+            "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
+            "margin": 44100,
+            "chunks": 20,
+            "denoise": true,
+            "dim_f": 3072,
+            "dim_t": 8,
+            "n_fft": 7680
+        },
+        "smru": {
+            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "chunk_size": 10,
+            "valid_size": 8,
+            "overlap": 2,
+            "batch_size": 9
+        }
+    },
+    "strategy_parameters": {
+        "merge_gap": 0.6,
+        "min_segment_length": 2.0,
+        "max_segment_length": 30.0,
+        "strategy": "fixed",
+        "fixed_dnsmos_threshold": 2.8,
+        "fixed_c50_threshold": 40.0,
+        "fixed_snr_threshold": 30.0,
+        "min_duration":2.0,
+        "max_duration":30.0,
+        "lower_bound_percent": 10,
+        "upper_bound_percent": 90,
+        "min_char_count": 2.0,
+        "inter_similarity_threshold": 0.69,
+        "intra_similarity_threshold": 0.64,
+        "refinement_batch_size": 256
+    },
+    "metrics": {
+        "dnsmos":{
+            "mos_model_path": "ckpts/sig_bak_ovr.onnx"
+        },
+        "use_brouhaha": true,
+        "brouhaha":{
+            "model": "pyannote/brouhaha",
+            "model_dir_cache": "/root/.cache/torch/pyannote/models--pyannote--brouhaha/snapshots/c93c9b537732dd50c28c0366c73f560c3a7aeb02/pytorch_model.bin"
+        }
+    },
+    "mos_model": {
+        "primary_model_path": "ckpts/sig_bak_ovr.onnx"
+    },
+    "huggingface_token": "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"
+}
