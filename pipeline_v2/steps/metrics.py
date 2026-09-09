@@ -30,6 +30,10 @@ class MetricsScorer:
             cache = params.brouhaha_model_dir_cache
             if cache and os.path.exists(cache):
                 model_ref = cache
+            if os.path.isdir(model_ref):
+                checkpoint = os.path.join(model_ref, "pytorch_model.bin")
+                if os.path.isfile(checkpoint):
+                    model_ref = checkpoint
             self.brouhaha_metric = brouhaha_metrics.ComputeScore(
                 model_ref, token=params.huggingface_token, device=device
             )

@@ -1,9 +1,11 @@
 import logging
 import os
 import tempfile
+from unittest.mock import patch
 
 import numpy as np
 import scipy.io.wavfile as wavfile
+import torch
 from brouhaha.pipeline import RegressiveActivityDetectionPipeline
 from pyannote.audio import Model
 
@@ -15,9 +17,24 @@ class ComputeScore:
         self._load_model(model, token, device)
 
     def _load_model(self, model, token, device):
-        self.model = Model.from_pretrained(
-            model, strict=False, device=device, use_auth_token=token
-        )
+        # PyTorch 2.6+ changed torch.load(weights_only) to True by default,
+        # while this trusted pyannote Lightning checkpoint contains ordinary
+        # metadata objects (e.g. TorchVersion). pyannote.audio 3.3 does not
+        # pass weights_only=False itself, so scope the compatibility override
+        # to this model load instead of changing global process behavior.
+        torch_load = torch.load
+
+        def load_checkpoint(*args, **kwargs):
+            if kwargs.get("weights_only") is None:
+                kwargs["weights_only"] = False
+            return torch_load(*args, **kwargs)
+
+        with patch("torch.load", load_checkpoint):
+            self.model = Model.from_pretrained(
+                model, strict=False, device=device, use_auth_token=token
+            )
+        if self.model is None:
+            raise RuntimeError(f"failed to load Brouhaha model: {model}")
         self.pipeline = RegressiveActivityDetectionPipeline(self.model)
 
     def __call__(self, samples: str, sample_rate=16000):

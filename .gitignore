@@ -17,6 +17,7 @@ venv/
 env/
 .env/
 .venv/
+.venv-diarizen/
 ENV/
 
 # IDE specific files
@@ -76,6 +77,8 @@ data/
 # Temporary files
 tmp/
 temp/
+.third_party/DiariZen/
+local_adapter_v2/
 
 
 iic/

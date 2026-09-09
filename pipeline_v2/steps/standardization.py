@@ -74,10 +74,10 @@ class Standardizer:
         normalize_ms = int((time.perf_counter() - t0) * 1000)
 
         total_dur = len(waveform) / p.target_sample_rate
-        if total_dur < p.chunk_min_seconds:
+        if total_dur < p.min_audio_seconds:
             total_ms = int((time.perf_counter() - t_total) * 1000)
             logger.error(
-                f"std_skip too_short {total_dur:.1f}s < {p.chunk_min_seconds:.0f}s "
+                f"std_skip too_short {total_dur:.1f}s < {p.min_audio_seconds:.1f}s "
                 f"total_ms {total_ms}",
                 extra=log_tag,
             )

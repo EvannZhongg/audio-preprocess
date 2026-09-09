@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -14,6 +15,7 @@ class StandardizationParams(BaseModel):
     max_audio_duration_seconds: float
     max_file_size_bytes: int
     target_dbfs: float
+    min_audio_seconds: float = 600.0
     chunk_min_seconds: float
     chunk_max_seconds: float
 
@@ -26,10 +28,27 @@ class SourceSeparationParams(BaseModel):
 
 
 class DiarizationParams(BaseModel):
-    provider: Literal["pyannote"]
-    huggingface_token: str
-    pyannote_model: str
-    pyannote_model_dir_cache: Optional[str]
+    # Keep the existing default backend and add only the DiariZen model used by
+    # local_adapter_v2. DiariZen runs in an isolated interpreter because its
+    # patched pyannote dependency is incompatible with the main environment.
+    provider: Literal["pyannote", "diarizen"]
+    huggingface_token: str = ""
+    pyannote_model: str = "pyannote/speaker-diarization-3.1"
+    pyannote_model_dir_cache: Optional[str] = None
+    diarizen_model: Literal[
+        "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
+    ] = "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
+    diarizen_model_dir_cache: Optional[str] = None
+    diarizen_embedding_model: str = "pyannote/wespeaker-voxceleb-resnet34-LM"
+    diarizen_embedding_model_path: Optional[str] = None
+    diarizen_cache_dir: Optional[str] = None
+    diarizen_python: str = ".venv-diarizen/bin/python"
+    diarizen_runner: str = "pipeline_v2/diarizen_runner.py"
+    num_speakers: Optional[int] = None
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+    timeout_base_seconds: int = 300
+    timeout_per_audio_second: float = 6.0
 
 
 class EmbeddingRefinementParams(BaseModel):
@@ -46,6 +65,15 @@ class SegmenterParams(BaseModel):
     intra_similarity_threshold: float  # min cosine sim between adjacent embeddings to merge
     grace_period_start: float          # seconds: extend start backward
     grace_period_end: float            # seconds: extend end forward
+    # Optional overlap-aware guards ported from local_adapter_v2. They default
+    # off so every existing config keeps the original PipelineV2 behavior.
+    block_merge_across_foreign: bool = False
+    drop_segments_with_foreign_speech: bool = False
+    trim_foreign_at_boundary: bool = False
+    foreign_tolerance: float = 0.10
+    split_around_foreign: bool = False
+    foreign_relabel_ratio: float = 0.80
+    enforce_min_after_grace: bool = False
 
 
 class MetricsParams(BaseModel):
@@ -100,11 +128,19 @@ class PipelineParams(BaseModel):
         """
         with open(config_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
+        if "entrypoint" not in cfg:
+            raise ValueError(
+                "unsupported pipeline config schema: missing top-level "
+                "'entrypoint'"
+            )
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         strategy = cfg.get("strategy_parameters", {})
+        standardization = cfg.get("standardization", {})
         embedding = cfg.get("embedding_refinement", {})
         separate = cfg.get("separate", {})
         pyannote = cfg.get("pyannote", {})
+        diarizen = cfg.get("diarizen", {})
         funasr = cfg.get("funasr", {})
         entrypoint = cfg.get("entrypoint", {})
         metrics_cfg = cfg.get("metrics", {})
@@ -116,12 +152,25 @@ class PipelineParams(BaseModel):
             "standardization": {
                 "target_sample_rate": entrypoint.get("SAMPLE_RATE", 24000),
                 "num_threads": cfg.get("threads", 4),
-                "ffmpeg_timeout": 200,
-                "max_audio_duration_seconds": 5 * 3600,
-                "max_file_size_bytes": 5 * 1024 * 1024 * 1024,
-                "target_dbfs": -20.0,
-                "chunk_min_seconds": 600.0,
-                "chunk_max_seconds": 1800.0,
+                "ffmpeg_timeout": standardization.get("ffmpeg_timeout", 200),
+                "max_audio_duration_seconds": standardization.get(
+                    "max_audio_duration_seconds", 5 * 3600
+                ),
+                "max_file_size_bytes": standardization.get(
+                    "max_file_size_bytes", 5 * 1024 * 1024 * 1024
+                ),
+                "target_dbfs": standardization.get("target_dbfs", -20.0),
+                # Preserve PipelineV2's historical behavior: files shorter
+                # than the minimum chunk size are skipped.
+                "min_audio_seconds": standardization.get(
+                    "min_audio_seconds", 600.0
+                ),
+                "chunk_min_seconds": standardization.get(
+                    "chunk_min_seconds", 600.0
+                ),
+                "chunk_max_seconds": standardization.get(
+                    "chunk_max_seconds", 1800.0
+                ),
             },
             "source_separation": {
                 "enable": separate.get("enable", True),
@@ -130,10 +179,31 @@ class PipelineParams(BaseModel):
                 "uvr_conf": separate.get("uvr", {}),
             },
             "diarization": {
-                "provider": pyannote.get("provider", "pyannote"),
-                "huggingface_token": cfg["huggingface_token"],
+                "provider": cfg.get(
+                    "diarization_provider", pyannote.get("provider", "pyannote")
+                ),
+                "huggingface_token": cfg.get("huggingface_token", ""),
                 "pyannote_model": pyannote.get("model", "pyannote/speaker-diarization-3.1"),
                 "pyannote_model_dir_cache": pyannote.get("model_dir_cache"),
+                "diarizen_model": diarizen.get(
+                    "model", "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
+                ),
+                "diarizen_model_dir_cache": diarizen.get("model_dir_cache"),
+                "diarizen_embedding_model": diarizen.get(
+                    "embedding_model", "pyannote/wespeaker-voxceleb-resnet34-LM"
+                ),
+                "diarizen_embedding_model_path": diarizen.get("embedding_model_path"),
+                "diarizen_cache_dir": diarizen.get("cache_dir"),
+                "diarizen_python": diarizen.get(
+                    "python_executable",
+                    os.path.join(repo_root, ".venv-diarizen", "bin", "python"),
+                ),
+                "diarizen_runner": diarizen.get(
+                    "runner", os.path.join(repo_root, "pipeline_v2", "diarizen_runner.py")
+                ),
+                "num_speakers": diarizen.get("num_speakers"),
+                "min_speakers": diarizen.get("min_speakers"),
+                "max_speakers": diarizen.get("max_speakers"),
             },
             "embedding_refinement": {
                 "enable": embedding.get("enable", True),
@@ -146,15 +216,31 @@ class PipelineParams(BaseModel):
                 "min_segment_length": strategy.get("min_segment_length", 3.0),
                 "max_segment_length": strategy.get("max_segment_length", 30.0),
                 "intra_similarity_threshold": strategy.get("intra_similarity_threshold", 0.64),
-                "grace_period_start": 0.0,
-                "grace_period_end": 0.02,
+                "grace_period_start": strategy.get("grace_period_start", 0.0),
+                "grace_period_end": strategy.get("grace_period_end", 0.02),
+                "block_merge_across_foreign": strategy.get(
+                    "block_merge_across_foreign", False
+                ),
+                "drop_segments_with_foreign_speech": strategy.get(
+                    "drop_segments_with_foreign_speech", False
+                ),
+                "trim_foreign_at_boundary": strategy.get(
+                    "trim_foreign_at_boundary", False
+                ),
+                "foreign_tolerance": strategy.get("foreign_tolerance", 0.10),
+                "split_around_foreign": strategy.get("split_around_foreign", False),
+                "foreign_relabel_ratio": strategy.get("foreign_relabel_ratio", 0.80),
+                "enforce_min_after_grace": strategy.get(
+                    "enforce_min_after_grace", False
+                ),
             },
             "metrics": {
                 "dnsmos_model_path": mos_model_cfg.get("primary_model_path", "ckpts/sig_bak_ovr.onnx"),
                 "use_brouhaha": metrics_cfg.get("use_brouhaha", False),
                 "brouhaha_model": brouhaha_cfg.get("model", "pyannote/brouhaha"),
                 "brouhaha_model_dir_cache": brouhaha_cfg.get("model_dir_cache"),
-                "huggingface_token": cfg["huggingface_token"],
+                "huggingface_token": cfg.get("huggingface_token")
+                or os.environ.get("HF_TOKEN", ""),
                 "fixed_c50_threshold": strategy.get("fixed_c50_threshold", 40.0),
                 "fixed_snr_threshold": strategy.get("fixed_snr_threshold", 40.0),
                 "strategy": strategy.get("strategy", "average"),
@@ -169,7 +255,6 @@ class PipelineParams(BaseModel):
             },
         }
         return cls.model_validate(v2)
-
 
 class Stage2Params(BaseModel):
     """Parameter schema for the stage-2 pipeline (ASR + v1 post-processing).

@@ -154,7 +154,11 @@ class PipelineV2:
         if state.vad_list is None or state.waveform is None or state.sample_rate is None:
             raise PipelineError("segment", "vad_list/waveform/sample_rate missing")
         segment_list = self.segmenter.run(
-            state.vad_list, state.waveform, state.sample_rate, log_tag=state.log_tag
+            state.vad_list,
+            state.waveform,
+            state.sample_rate,
+            log_tag=state.log_tag,
+            diarize_df=state.diarize_df,
         )
         if segment_list is None:
             raise PipelineError("segment", "segment_list is None")

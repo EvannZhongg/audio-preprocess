@@ -28,6 +28,10 @@ from pipeline_v2.state import Segment
 _SILERO_SR = 16000
 
 
+def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
 class Segmenter:
     """Produces the final `segment_list` consumed by downstream ASR.
 
@@ -48,6 +52,7 @@ class Segmenter:
         waveform: np.ndarray,
         sample_rate: int,
         log_tag: Optional[dict] = None,
+        diarize_df=None,
     ) -> Optional[list[Segment]]:
         if not vad_list:
             logger.error("seg_empty_input_vad_list", extra=log_tag)
@@ -56,22 +61,38 @@ class Segmenter:
         t_total = time.perf_counter()
         try:
             t0 = time.perf_counter()
-            merged, n_split, n_drop_long = self._split_and_merge(
-                vad_list, waveform, sample_rate, log_tag
+            merged, n_split, n_drop_long, n_blocked_merge = self._split_and_merge(
+                vad_list, waveform, sample_rate, diarize_df, log_tag
             )
             merge_ms = int((time.perf_counter() - t0) * 1000)
 
             t0 = time.perf_counter()
+            guarded, n_drop_foreign, n_relabel_kept, n_split_kept = (
+                self._apply_foreign_speech_guards(merged, diarize_df)
+            )
+            guard_ms = int((time.perf_counter() - t0) * 1000)
+
+            t0 = time.perf_counter()
             filtered = [
-                s for s in merged
+                s for s in guarded
                 if s.end - s.start >= self.params.min_segment_length
             ]
-            n_drop_short = len(merged) - len(filtered)
+            n_drop_short = len(guarded) - len(filtered)
             filter_ms = int((time.perf_counter() - t0) * 1000)
 
             t0 = time.perf_counter()
             audio_duration = len(waveform) / sample_rate
             self._apply_grace_period(filtered, audio_duration)
+            if self.params.enforce_min_after_grace:
+                before_post_grace = len(filtered)
+                filtered = [
+                    s for s in filtered
+                    if s.end - s.start >= self.params.min_segment_length
+                ]
+                n_drop_short += before_post_grace - len(filtered)
+            if self._foreign_guards_enabled():
+                for idx, segment in enumerate(filtered):
+                    segment.index = str(idx)
             grace_ms = int((time.perf_counter() - t0) * 1000)
         except Exception:
             logger.error(f"seg_runtime_error {traceback.format_exc()}", extra=log_tag)
@@ -81,7 +102,10 @@ class Segmenter:
         logger.info(
             f"seg_time_cost in {len(vad_list)} out {len(filtered)} "
             f"split {n_split} drop_long {n_drop_long} drop_short {n_drop_short} "
-            f"merge_ms {merge_ms} filter_ms {filter_ms} grace_ms {grace_ms} "
+            f"blocked_merge {n_blocked_merge} drop_foreign {n_drop_foreign} "
+            f"relabel_kept {n_relabel_kept} split_kept {n_split_kept} "
+            f"merge_ms {merge_ms} guard_ms {guard_ms} "
+            f"filter_ms {filter_ms} grace_ms {grace_ms} "
             f"total_ms {total_ms}",
             extra=log_tag,
         )
@@ -95,12 +119,14 @@ class Segmenter:
         vad_list: list[Segment],
         waveform: np.ndarray,
         sample_rate: int,
+        diarize_df,
         log_tag: Optional[dict],
-    ) -> tuple[list[Segment], int, int]:
+    ) -> tuple[list[Segment], int, int, int]:
         p = self.params
         out: list[Segment] = []
         n_split = 0
         n_drop_long = 0
+        n_blocked_merge = 0
 
         for seg in vad_list:
             duration = seg.end - seg.start
@@ -133,12 +159,161 @@ class Segmenter:
 
             gap = seg.start - last.end
             merged_dur = seg.end - last.start
-            if gap >= p.merge_gap or merged_dur >= p.max_segment_length:
+            crosses_foreign = (
+                p.block_merge_across_foreign
+                and self._foreign_overlap(
+                    last.speaker, last.end, seg.start, diarize_df
+                ) > p.foreign_tolerance
+            )
+            if crosses_foreign:
+                n_blocked_merge += 1
+            if (
+                gap >= p.merge_gap
+                or merged_dur >= p.max_segment_length
+                or crosses_foreign
+            ):
                 out.append(seg)
             else:
                 last.end = seg.end
 
-        return out, n_split, n_drop_long
+        return out, n_split, n_drop_long, n_blocked_merge
+
+    # ------------------------------------------------------------------
+    # overlap-aware guards (local_adapter_v2)
+    # ------------------------------------------------------------------
+    def _foreign_guards_enabled(self) -> bool:
+        p = self.params
+        return (
+            p.block_merge_across_foreign
+            or p.drop_segments_with_foreign_speech
+            or p.trim_foreign_at_boundary
+            or p.enforce_min_after_grace
+        )
+
+    @staticmethod
+    def _foreign_spans(speaker: str, diarize_df) -> list[tuple[float, float]]:
+        if diarize_df is None or len(diarize_df) == 0:
+            return []
+        return [
+            (float(row["start"]), float(row["end"]))
+            for _, row in diarize_df.iterrows()
+            if str(row["speaker"]) != speaker
+        ]
+
+    @staticmethod
+    def _foreign_overlap(
+        speaker: str,
+        start: float,
+        end: float,
+        diarize_df,
+    ) -> float:
+        return sum(
+            _overlap(start, end, foreign_start, foreign_end)
+            for foreign_start, foreign_end in Segmenter._foreign_spans(
+                speaker, diarize_df
+            )
+        )
+
+    def _apply_foreign_speech_guards(
+        self,
+        segments: list[Segment],
+        diarize_df,
+    ) -> tuple[list[Segment], int, int, int]:
+        p = self.params
+        if diarize_df is None or len(diarize_df) == 0:
+            return segments, 0, 0, 0
+
+        spans_cache: dict[str, list[tuple[float, float]]] = {}
+
+        def spans_for(speaker: str) -> list[tuple[float, float]]:
+            if speaker not in spans_cache:
+                spans_cache[speaker] = self._foreign_spans(speaker, diarize_df)
+            return spans_cache[speaker]
+
+        if p.trim_foreign_at_boundary:
+            for segment in segments:
+                self._trim_foreign_at_boundary(
+                    segment, spans_for(segment.speaker), p.foreign_tolerance
+                )
+
+        if not p.drop_segments_with_foreign_speech:
+            return segments, 0, 0, 0
+
+        survivors: list[Segment] = []
+        n_drop_foreign = 0
+        n_relabel_kept = 0
+        n_split_kept = 0
+        for segment in segments:
+            spans = spans_for(segment.speaker)
+            duration = segment.end - segment.start
+            foreign_duration = sum(
+                _overlap(segment.start, segment.end, start, end)
+                for start, end in spans
+            )
+            if foreign_duration <= p.foreign_tolerance:
+                survivors.append(segment)
+                continue
+            if (
+                duration > 0
+                and foreign_duration / duration >= p.foreign_relabel_ratio
+            ):
+                n_relabel_kept += 1
+                survivors.append(segment)
+                continue
+            if p.split_around_foreign:
+                pieces = self._split_around_foreign(
+                    segment, spans, p.foreign_tolerance
+                )
+                if pieces:
+                    n_split_kept += len(pieces)
+                    survivors.extend(pieces)
+                    continue
+            n_drop_foreign += 1
+
+        survivors.sort(key=lambda s: (s.start, s.end))
+        return survivors, n_drop_foreign, n_relabel_kept, n_split_kept
+
+    def _split_around_foreign(
+        self,
+        segment: Segment,
+        spans: list[tuple[float, float]],
+        tolerance: float,
+    ) -> list[Segment]:
+        blocking = sorted(
+            span
+            for span in spans
+            if _overlap(segment.start, segment.end, *span) > tolerance
+        )
+        pieces: list[Segment] = []
+        cursor = segment.start
+        for foreign_start, foreign_end in blocking:
+            clean_end = min(foreign_start, segment.end)
+            if clean_end - cursor >= self.params.min_segment_length:
+                pieces.append(replace(segment, start=cursor, end=clean_end))
+            cursor = max(cursor, foreign_end)
+            if cursor >= segment.end:
+                break
+        if segment.end - cursor >= self.params.min_segment_length:
+            pieces.append(replace(segment, start=cursor, end=segment.end))
+        return pieces
+
+    @staticmethod
+    def _trim_foreign_at_boundary(
+        segment: Segment,
+        spans: list[tuple[float, float]],
+        tolerance: float,
+    ) -> None:
+        for foreign_start, foreign_end in spans:
+            if (
+                _overlap(
+                    segment.start, segment.end, foreign_start, foreign_end
+                ) <= tolerance
+            ):
+                continue
+            if foreign_start <= segment.start < foreign_end < segment.end:
+                segment.start = foreign_end
+            elif segment.start < foreign_start < segment.end <= foreign_end:
+                segment.end = foreign_start
 
     def _split_long(
         self,

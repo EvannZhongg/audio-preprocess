@@ -415,3 +415,17 @@ tail -f run.log
 3. **宁可丢段也不强切**：超过 `max_segment_length` 的长段，如果 silero-vad 找不到内部停顿，丢弃整段而非在词中间硬切。
 4. **每语种独立校准**：阈值（PPL、speaking_rate、alignment_score 等）按语种 ASR 输出特性单独配置。
 5. **失败可观测**：每步的丢弃数、丢弃时长写入 `processing_report.csv` 便于事后分析。
+
+## PipelineV2：local_adapter_v2 优化模式
+
+PipelineV2 通过原生配置
+`configs/config_pipeline_v2_diarizen_tts_clean_v2.json` 使用
+`BUT-FIT/diarizen-wavlm-large-s80-md-v2` 和对应分段优化，同时保持现有
+导出数据结构不变。原始配置行为默认不变，且不读取
+`local_adapter_v2/configs/tts_clean_v2.json`。
+
+安装、GPU 运行和原始/优化 A/B 测试方式见：
+
+```text
+pipeline_v2/LOCAL_ADAPTER_V2.md
+```

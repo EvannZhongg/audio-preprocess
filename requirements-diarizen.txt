@@ -1,0 +1,21 @@
+# Install only into the isolated .venv-diarizen environment.
+# DiariZen carries a patched pyannote.audio tree and must not replace the
+# pyannote.audio==3.3.2 dependency used by PipelineV2's existing default model.
+torch==2.1.1
+torchaudio==2.1.1
+torchvision==0.16.1
+numpy==1.26.4
+einops
+flit
+h5py
+joblib
+librosa
+matplotlib
+scipy
+soundfile
+tabulate
+toml
+torchinfo
+tqdm
+accelerate==1.6.0
+thop
