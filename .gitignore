@@ -61,9 +61,6 @@ coverage.xml
 *.gguf
 data/
 
-# Vendored/downloaded archives
-/third_party/brouhaha-vad-main.zip
-
 # Audio files
 *.wav
 *.mp3
