@@ -1,0 +1,82 @@
+{
+    "device_name": "cuda:0",
+    "threads": 4,
+    "entrypoint": {
+        "SAMPLE_RATE": 24000
+    },
+    "standardization": {
+        "ffmpeg_timeout": 200,
+        "max_audio_duration_seconds": 36000,
+        "max_file_size_bytes": 5368709120,
+        "target_dbfs": -20.0,
+        "min_audio_seconds": 0.5,
+        "chunk_min_seconds": 600,
+        "chunk_max_seconds": 1800
+    },
+    "diarization_provider": "pyannote",
+    "pyannote": {
+        "model": "pyannote/speaker-diarization-3.1",
+        "model_dir_cache": "ckpts/pyannote_config.yaml"
+    },
+    "embedding_refinement": {
+        "enable": true,
+        "eres2net_model_path": "ckpts/pretrained_eres2netv2.ckpt"
+    },
+    "separate": {
+        "enable": true,
+        "provider": "smru",
+        "uvr": {
+            "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
+            "margin": 44100,
+            "chunks": 20,
+            "denoise": true,
+            "dim_f": 3072,
+            "dim_t": 8,
+            "n_fft": 7680
+        },
+        "smru": {
+            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "chunk_size": 12,
+            "valid_size": 8,
+            "overlap": 1,
+            "batch_size": 4
+        }
+    },
+    "strategy_parameters": {
+        "merge_gap": 0.8,
+        "min_segment_length": 2.0,
+        "max_segment_length": 30.0,
+        "inter_similarity_threshold": 0.7,
+        "intra_similarity_threshold": 0.62,
+        "refinement_batch_size": 64,
+        "grace_period_start": 0.0,
+        "grace_period_end": 0.02,
+        "block_merge_across_foreign": false,
+        "drop_segments_with_foreign_speech": false,
+        "trim_foreign_at_boundary": false,
+        "foreign_tolerance": 0.1,
+        "split_around_foreign": false,
+        "foreign_relabel_ratio": 0.8,
+        "enforce_min_after_grace": false,
+        "strategy": "fixed",
+        "fixed_dnsmos_threshold": 3.0,
+        "fixed_c50_threshold": 40.0,
+        "fixed_snr_threshold": 30.0
+    },
+    "metrics": {
+        "use_brouhaha": true,
+        "brouhaha": {
+            "model": "pyannote/brouhaha",
+            "model_dir_cache": null
+        }
+    },
+    "mos_model": {
+        "primary_model_path": "ckpts/sig_bak_ovr.onnx"
+    },
+    "funasr": {
+        "model": "iic/SenseVoiceSmall",
+        "model_dir_cache": "",
+        "vad_model": "fsmn-vad",
+        "vad_model_dir_cache": ""
+    }
+}
