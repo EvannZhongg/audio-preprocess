@@ -102,6 +102,25 @@ class ConfigMappingTests(unittest.TestCase):
         self.assertFalse(parsed.segmenter.trim_foreign_at_boundary)
         self.assertFalse(parsed.segmenter.split_around_foreign)
         self.assertFalse(parsed.segmenter.enforce_min_after_grace)
+        # None on every DiariZen knob == inherit the model's own config.toml, so
+        # configs predating these knobs keep byte-identical behavior.
+        self.assertIsNone(parsed.diarization.diarizen_segmentation_step)
+        self.assertIsNone(parsed.diarization.diarizen_batch_size)
+        self.assertIsNone(parsed.diarization.diarizen_apply_median_filtering)
+
+    def test_segmentation_step_is_range_checked(self):
+        # Out-of-range steps must fail at config-parse time. Upstream
+        # Inference.__init__ would otherwise raise during resident-worker spawn,
+        # i.e. while the caller holds the GPU lock.
+        for bad in (0.0, -0.1, 1.5):
+            with self.assertRaises(Exception):
+                params_mod.DiarizationParams(
+                    provider="diarizen", diarizen_segmentation_step=bad
+                )
+        for good in (0.1, 0.25, 1.0):
+            params_mod.DiarizationParams(
+                provider="diarizen", diarizen_segmentation_step=good
+            )
 
     def test_native_optimized_config_maps_to_diarizen_and_guards(self):
         parsed = PipelineParams.from_config(
@@ -114,9 +133,36 @@ class ConfigMappingTests(unittest.TestCase):
             "BUT-FIT/diarizen-wavlm-large-s80-md-v2",
         )
         self.assertEqual(parsed.device_name, "cuda:0")
-        self.assertEqual(parsed.diarization.num_speakers, 2)
+        self.assertIsNone(parsed.diarization.num_speakers)
+        self.assertIsNone(parsed.diarization.min_speakers)
+        self.assertIsNone(parsed.diarization.max_speakers)
         self.assertTrue(parsed.source_separation.enable)
-        self.assertEqual(parsed.source_separation.provider, "uvr")
+        # SMRU is the recommended separator and what the original PipelineV2
+        # configs use; the optimized config previously declared provider "uvr"
+        # with an EMPTY smru block, so assert the block is actually populated.
+        self.assertEqual(parsed.source_separation.provider, "smru")
+        self.assertEqual(
+            parsed.source_separation.smru_conf,
+            {
+                "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+                "chunk_size": 12,
+                "valid_size": 8,
+                "overlap": 1,
+                "batch_size": 4,
+            },
+        )
+        # UVR stays configured so the provider is a one-word A/B switch.
+        self.assertEqual(
+            parsed.source_separation.uvr_conf["model_path"],
+            "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
+        )
+        # segmentation_step is the speed/accuracy dial; the other two knobs are
+        # deliberately absent from the json so they inherit the model's own
+        # config.toml (None == "don't override").
+        self.assertAlmostEqual(parsed.diarization.diarizen_segmentation_step, 0.25)
+        self.assertIsNone(parsed.diarization.diarizen_batch_size)
+        self.assertIsNone(parsed.diarization.diarizen_apply_median_filtering)
+        self.assertTrue(parsed.diarization.diarizen_resident)
         self.assertAlmostEqual(parsed.embedding_refinement.inter_similarity_threshold, 0.55)
         self.assertEqual(parsed.embedding_refinement.refinement_batch_size, 16)
         self.assertTrue(parsed.segmenter.block_merge_across_foreign)
@@ -158,8 +204,29 @@ class ConfigMappingTests(unittest.TestCase):
             str(ROOT / "configs/config_pipeline_v2_diarizen_tts_clean_v2.json")
         )
         diarizer = diarization_mod.Diarizer(parsed.diarization, "cuda:2")
+        # Constructing a Diarizer must remain completely side-effect-free: this
+        # runs on machines with neither .venv-diarizen nor CUDA, so the resident
+        # worker has to be spawned lazily on the first run().
+        self.assertIsNone(diarizer._worker)
+
         command = diarizer._diarizen_command(Path("/tmp/in.wav"), Path("/tmp/out.json"))
         self.assertEqual(command[command.index("--device") + 1], "cuda:0")
+        # Knobs set in the json are forwarded; knobs left unset must NOT appear,
+        # so the child inherits the model's own config.toml.
+        self.assertEqual(
+            command[command.index("--segmentation-step") + 1], "0.25"
+        )
+        self.assertNotIn("--batch-size", command)
+        self.assertNotIn("--apply-median-filtering", command)
+        self.assertNotIn("--no-apply-median-filtering", command)
+        # One-shot argv must not carry --serve; serve mode must.
+        self.assertNotIn("--serve", command)
+        self.assertIn(
+            "--serve",
+            diarizer._diarizen_command(
+                Path("/tmp/in.wav"), Path("/tmp/out.json"), serve=True
+            ),
+        )
 
         old_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
         os.environ["CUDA_VISIBLE_DEVICES"] = "4,7,9"
@@ -170,6 +237,34 @@ class ConfigMappingTests(unittest.TestCase):
                 os.environ.pop("CUDA_VISIBLE_DEVICES", None)
             else:
                 os.environ["CUDA_VISIBLE_DEVICES"] = old_visible
+
+    def test_median_filter_disabled_uses_paired_negative_flag(self):
+        # The knob is tri-state (None / True / False), so an explicit False has
+        # to be expressible on the command line.
+        pyannote_pkg = types.ModuleType("pyannote")
+        pyannote_audio = types.ModuleType("pyannote.audio")
+        pyannote_audio.Pipeline = object
+        pyannote_pkg.audio = pyannote_audio
+        sys.modules["pyannote"] = pyannote_pkg
+        sys.modules["pyannote.audio"] = pyannote_audio
+        try:
+            diarization_mod = load_module(
+                "_test_pipeline_v2_speaker_diarization_mf",
+                "pipeline_v2/steps/speaker_diarization.py",
+            )
+        finally:
+            sys.modules.pop("pyannote", None)
+            sys.modules.pop("pyannote.audio", None)
+
+        params = params_mod.DiarizationParams(
+            provider="diarizen", diarizen_apply_median_filtering=False
+        )
+        command = diarization_mod.Diarizer(params, "cpu")._diarizen_command(
+            Path("/tmp/in.wav"), Path("/tmp/out.json")
+        )
+        self.assertIn("--no-apply-median-filtering", command)
+        self.assertNotIn("--apply-median-filtering", command)
+        self.assertEqual(command[command.index("--device") + 1], "cpu")
 
     def test_local_adapter_config_schema_is_rejected(self):
         with self.assertRaisesRegex(

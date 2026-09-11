@@ -24,7 +24,8 @@
         "embedding_model": "pyannote/wespeaker-voxceleb-resnet34-LM",
         "embedding_model_path": null,
         "cache_dir": null,
-        "num_speakers": 2
+        "segmentation_step": 0.25,
+        "resident": true
     },
     "embedding_refinement": {
         "enable": true,
@@ -32,7 +33,7 @@
     },
     "separate": {
         "enable": true,
-        "provider": "uvr",
+        "provider": "smru",
         "uvr": {
             "model_path": "ckpts/UVR-MDX-NET-Inst_HQ_3.onnx",
             "margin": 44100,
@@ -42,7 +43,13 @@
             "dim_t": 8,
             "n_fft": 7680
         },
-        "smru": {}
+        "smru": {
+            "conf": "ckpts/denoise_derev_48k_SFI_E128.yaml",
+            "chunk_size": 12,
+            "valid_size": 8,
+            "overlap": 1,
+            "batch_size": 4
+        }
     },
     "strategy_parameters": {
         "merge_gap": 0.8,
