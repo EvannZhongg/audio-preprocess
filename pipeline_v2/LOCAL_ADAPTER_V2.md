@@ -156,18 +156,39 @@ python main_v2.py \
   --num-workers 1
 ```
 
-## 一次运行两组对比
+## 一次运行三组对比
+
+三个配置刻意做了变量隔离，每一步只改一件事：
+
+| 模式 | 配置 | 分离模型 | 分段防线 |
+|---|---|---|---|
+| `baseline` | `configs/config_pipeline_v2_baseline_ab.json` | pyannote 3.1 | 关 |
+| `modelswap` | `configs/config_pipeline_v2_diarizen_swap_ab.json` | **DiariZen** | 关 |
+| `optimized` | `configs/config_pipeline_v2_diarizen_tts_clean_v2.json` | DiariZen | **开** |
+
+于是 `baseline → modelswap` 的差异**只归因于分离模型**，
+`modelswap → optimized` 的差异**只归因于分段流程**。
 
 ```bash
-python scripts/compare_pipeline_v2_modes.py \
-  --input /path/to/audio \
-  --output-root /path/to/ab-output \
-  --baseline-config configs/config.json \
-  --optimized-config configs/config_pipeline_v2_diarizen_tts_clean_v2.json \
-  --overwrite
+bash scripts/run_ab_compare.sh audios_test ab_out
+# 只跑其中两组：
+bash scripts/run_ab_compare.sh audios_test ab_out "baseline modelswap"
 ```
 
-输出分别位于 `ab-output/baseline` 和 `ab-output/optimized`。原始模式可能
-仍需要现有配置声明的模型缓存；优化模式还需要上述 DiariZen 独立环境。
-脚本还会写入 `ab-output/comparison_summary.json`，汇总段数、保留时长、
-最短/最长段长、DNSMOS/C50/SNR 中位数，并校验两组 JSON 字段结构一致。
+三个配置在 chunking、分离器（均为 SMRU）、brouhaha 路径、`min_audio_seconds`
+上完全一致——**不要拿 `configs/config.json` 直接当基线**，它的
+`min_audio_seconds: 600` 会让短于 10 分钟的文件被整个跳过
+（`standardization.py:77`），基线一段都不输出，看起来像优化版完胜。
+
+### 读结果的关键一点
+
+对比脚本报两个污染指标，**只有第二个能跨模型比较**：
+
+- `contaminated segments`——导出段之间的跨说话人时间重叠。它**只能看到该模式
+  自己的分离模型标注出来的重叠**。一个压根没检出应答的模型在这里得 0 分，
+  看起来完美，实际上把应答整个吞了。
+- `swallowed backchannels`——以**所有模式检出结果的并集**为参照，统计有多少短
+  应答落在本模式某个归属他人的段内部。这才是诚实的跨模型数字。
+
+这正是本次引入 DiariZen 的原因：它是唯一能识别这类短促串音的模型，而
+"看不见的污染"在旧指标下是隐形的。

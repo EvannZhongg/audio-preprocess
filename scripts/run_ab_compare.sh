@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
-# A/B compare the original PipelineV2 flow against the optimized (DiariZen) one.
+# Compare PipelineV2 modes on the same audio, three ways by default:
+#
+#   baseline   original flow, pyannote diarizer
+#   modelswap  original flow, DiariZen diarizer        <- isolates the MODEL
+#   optimized  local_adapter_v2 flow, DiariZen         <- isolates the FLOW
+#
+# The three configs are matched on everything not under test (chunking,
+# separation provider, brouhaha path, thresholds), so baseline->modelswap
+# attributes purely to the diarization model and modelswap->optimized purely
+# to the segmentation guards.
 #
 # Run from the repo root on the GPU box:
-#     bash scripts/run_ab_compare.sh [AUDIO_DIR] [OUTPUT_ROOT]
+#     bash scripts/run_ab_compare.sh [AUDIO_DIR] [OUTPUT_ROOT] [MODES]
 #
-# Defaults match the layout described in the task: audio in ./audios_test,
-# results under ./ab_out. Both modes go through the same exporter, so the
-# WAV/JSON schema is identical and the outputs are directly comparable.
+#     bash scripts/run_ab_compare.sh audios_test ab_out
+#     bash scripts/run_ab_compare.sh audios_test ab_out "baseline modelswap"
 set -euo pipefail
 
 AUDIO="${1:-audios_test}"
 OUT="${2:-ab_out}"
+MODES="${3:-baseline modelswap optimized}"
 
 # Honor an explicit PYTHON, else prefer python3 (python may be absent outside
 # an activated conda env).
@@ -22,8 +31,14 @@ if [ -z "$PY" ]; then
   fi
 fi
 
-BASELINE_CONFIG="configs/config_pipeline_v2_baseline_ab.json"
-OPTIMIZED_CONFIG="configs/config_pipeline_v2_diarizen_tts_clean_v2.json"
+config_for () {
+  case "$1" in
+    baseline)  echo "configs/config_pipeline_v2_baseline_ab.json" ;;
+    modelswap) echo "configs/config_pipeline_v2_diarizen_swap_ab.json" ;;
+    optimized) echo "configs/config_pipeline_v2_diarizen_tts_clean_v2.json" ;;
+    *) echo "" ;;
+  esac
+}
 
 # Offline mode is not optional. Every model here is already on disk, but the
 # loaders still try to revalidate against the Hub, and a stalled revalidation
@@ -38,27 +53,37 @@ if [ ! -d "$AUDIO" ]; then
   echo "audio directory not found: $AUDIO" >&2
   exit 1
 fi
-for cfg in "$BASELINE_CONFIG" "$OPTIMIZED_CONFIG"; do
+
+NEEDS_DIARIZEN=0
+for mode in $MODES; do
+  cfg="$(config_for "$mode")"
+  if [ -z "$cfg" ]; then
+    echo "unknown mode: $mode (want: baseline modelswap optimized)" >&2
+    exit 1
+  fi
   [ -f "$cfg" ] || { echo "missing config: $cfg" >&2; exit 1; }
+  [ "$mode" = "baseline" ] || NEEDS_DIARIZEN=1
 done
 
 # The DiariZen worker needs its own interpreter. Fail loudly now rather than
 # after the baseline run has already burned an hour.
-DIARIZEN_PY="$($PY - <<'PYEOF'
+if [ "$NEEDS_DIARIZEN" = "1" ]; then
+  DIARIZEN_PY="$($PY - <<'PYEOF'
 import json
 cfg = json.load(open("configs/config_pipeline_v2_diarizen_tts_clean_v2.json"))
 print(cfg.get("diarizen", {}).get("python_executable", ".venv-diarizen/bin/python"))
 PYEOF
 )"
-if [ ! -x "$DIARIZEN_PY" ]; then
-  echo "DiariZen interpreter not executable: $DIARIZEN_PY" >&2
-  echo "run scripts/install_pipeline_v2_diarizen.sh, or set" >&2
-  echo "diarizen.python_executable in $OPTIMIZED_CONFIG" >&2
-  exit 1
+  if [ ! -x "$DIARIZEN_PY" ]; then
+    echo "DiariZen interpreter not executable: $DIARIZEN_PY" >&2
+    echo "run scripts/install_pipeline_v2_diarizen.sh, or set" >&2
+    echo "diarizen.python_executable in the diarizen configs" >&2
+    exit 1
+  fi
 fi
 
 mkdir -p logs "$OUT"
-echo "audio=$AUDIO  output=$OUT"
+echo "audio=$AUDIO  output=$OUT  modes=$MODES"
 echo "files: $(find "$AUDIO" -type f \( -name '*.wav' -o -name '*.mp3' -o -name '*.flac' -o -name '*.m4a' \) | wc -l)"
 echo
 
@@ -70,7 +95,7 @@ run_mode () {
   # One worker per mode: with num-workers > 1 every worker builds its own
   # model set on the SAME card (no per-worker GPU split), which distorts
   # per-stage timings and risks OOM. Timing comparisons need 1.
-  /usr/bin/time -v "$PY" main_v2.py \
+  "$PY" main_v2.py \
       --config "$config" \
       --input "$AUDIO" \
       --output "$OUT/$label" \
@@ -82,8 +107,11 @@ run_mode () {
   echo
 }
 
-run_mode baseline  "$BASELINE_CONFIG"
-run_mode optimized "$OPTIMIZED_CONFIG"
+TREES=""
+for mode in $MODES; do
+  run_mode "$mode" "$(config_for "$mode")"
+  TREES="$TREES $OUT/$mode"
+done
 
 # Any DiariZen child must be gone once main_v2.py has exited. A survivor is
 # holding VRAM and is a bug worth knowing about immediately.
@@ -95,5 +123,5 @@ fi
 echo "=============================================================="
 echo " comparison"
 echo "=============================================================="
-"$PY" scripts/compare_ab_outputs.py "$OUT/baseline" "$OUT/optimized" \
-    --output "$OUT/comparison.json"
+# shellcheck disable=SC2086
+"$PY" scripts/compare_ab_outputs.py $TREES --output "$OUT/comparison.json"
