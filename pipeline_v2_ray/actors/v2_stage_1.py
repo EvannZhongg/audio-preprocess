@@ -163,3 +163,12 @@ class GpuPipelineActor(PipelineActor):
             # while another concurrent file is mid-GPU-stage.
             with self._gpu_lock:
                 torch.cuda.empty_cache()
+                # Drop a dead resident DiariZen worker handle promptly so the
+                # next file respawns instead of discovering the corpse mid-
+                # chunk. Deliberately NOT a close(): that would defeat the
+                # point of keeping the model loaded across files.
+                try:
+                    if self._pipeline.diarizer.reap_if_dead():
+                        logger.info("ray_diarizen_worker_reaped", extra=log_tag)
+                except Exception as e:  # noqa: BLE001 - never fail a file on this
+                    logger.error(f"ray_diarizen_reap_error {type(e).__name__}: {e}")

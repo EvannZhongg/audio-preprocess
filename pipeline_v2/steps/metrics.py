@@ -51,9 +51,15 @@ class MetricsScorer:
 
         t_total = time.perf_counter()
         try:
-            audio_16k = librosa.resample(
-                waveform, orig_sr=sample_rate, target_sr=_FEAT_SR
-            )
+            # DNSMOS and Brouhaha both require 16 kHz. Resample the complete
+            # standardized pipeline chunk once, then let every segment and
+            # both metrics share slices from the same 16 kHz waveform.
+            if sample_rate == _FEAT_SR:
+                waveform_16k = waveform
+            else:
+                waveform_16k = librosa.resample(
+                    waveform, orig_sr=sample_rate, target_sr=_FEAT_SR
+                )
         except Exception:
             logger.error(f"metrics_resample_error {traceback.format_exc()}", extra=log_tag)
             return None
@@ -70,8 +76,8 @@ class MetricsScorer:
         scored: list[Segment] = []
         n_seg_failed = 0
         for seg in segment_list:
-            start = int(seg.start * _FEAT_SR)
-            end = int(seg.end * _FEAT_SR)
+            start = max(0, int(seg.start * _FEAT_SR))
+            end = min(len(waveform_16k), int(seg.end * _FEAT_SR))
             if end <= start:
                 n_seg_failed += 1
                 logger.error(
@@ -80,13 +86,13 @@ class MetricsScorer:
                     extra=log_tag,
                 )
                 continue
-            chunk = audio_16k[start:end]
+            chunk_16k = waveform_16k[start:end]
             try:
                 seg.dnsmos = float(
-                    self.dnsmos_compute_score(chunk, _FEAT_SR, False)["OVRL"]
+                    self.dnsmos_compute_score(chunk_16k, _FEAT_SR, False)["OVRL"]
                 )
                 if self.brouhaha_metric is not None:
-                    c50, snr = self.brouhaha_metric(chunk, _FEAT_SR)
+                    c50, snr = self.brouhaha_metric(chunk_16k, _FEAT_SR)
                     seg.c50 = float(c50)
                     seg.snr = float(snr)
                 else:

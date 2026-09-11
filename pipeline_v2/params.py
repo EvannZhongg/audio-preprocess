@@ -5,7 +5,7 @@ import json
 import os
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class StandardizationParams(BaseModel):
@@ -35,9 +35,7 @@ class DiarizationParams(BaseModel):
     huggingface_token: str = ""
     pyannote_model: str = "pyannote/speaker-diarization-3.1"
     pyannote_model_dir_cache: Optional[str] = None
-    diarizen_model: Literal[
-        "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
-    ] = "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
+    diarizen_model: str = "BUT-FIT/diarizen-wavlm-large-s80-md-v2"
     diarizen_model_dir_cache: Optional[str] = None
     diarizen_embedding_model: str = "pyannote/wespeaker-voxceleb-resnet34-LM"
     diarizen_embedding_model_path: Optional[str] = None
@@ -47,8 +45,45 @@ class DiarizationParams(BaseModel):
     num_speakers: Optional[int] = None
     min_speakers: Optional[int] = None
     max_speakers: Optional[int] = None
+    # DiariZen inference knobs, all None = "use whatever the model's own
+    # config.toml ships", so every pre-existing config keeps byte-identical
+    # behavior and the knobs are purely opt-in.
+    #
+    # segmentation_step is the accuracy/speed dial: it is the sliding-window
+    # advance expressed as a FRACTION of seg_duration (16s for this model), so
+    # the model default of 0.1 means a 16s window stepping 1.6s -- every frame
+    # of audio goes through WavLM-large ~10 times. Cost scales ~1/step.
+    # Measured on CPU (180s clip): 0.1 -> 190s, 0.25 -> 76s (2.5x), 0.5 -> 52s
+    # (3.7x), with short-backchannel detection flat-to-better at every step.
+    diarizen_segmentation_step: Optional[float] = None
+    # Shared by BOTH the segmentation and embedding batch sizes upstream (see
+    # DiariZen's inference.py, which feeds this one value to both).
+    diarizen_batch_size: Optional[int] = None
+    # 11-frame (~0.22s) median filter over the segmentation output. Disabling it
+    # surfaces a handful of sub-100ms fragments that min_segment_length drops
+    # anyway, and it costs nothing either way -- exposed for sweeps, not tuning.
+    diarizen_apply_median_filtering: Optional[bool] = None
+    # Run DiariZen as one long-lived worker (model loaded once) instead of a
+    # fresh subprocess per chunk. Matches how the pyannote backend already
+    # behaves (loaded once in __init__, resident for the process's life).
+    # Set false to fall back to one-shot spawning for A/B or rollback.
+    diarizen_resident: bool = True
     timeout_base_seconds: int = 300
     timeout_per_audio_second: float = 6.0
+
+    @field_validator("diarizen_segmentation_step")
+    @classmethod
+    def _check_segmentation_step(cls, v: Optional[float]) -> Optional[float]:
+        """Reject out-of-range steps here rather than letting them blow up
+        later. Upstream `Inference.__init__` raises when step > duration, and
+        in resident mode that happens during worker spawn -- while the caller
+        holds the GPU lock -- which is a much worse place to find out.
+        """
+        if v is not None and not 0.0 < v <= 1.0:
+            raise ValueError(
+                f"diarizen segmentation_step must be in (0.0, 1.0], got {v}"
+            )
+        return v
 
 
 class EmbeddingRefinementParams(BaseModel):
@@ -204,6 +239,22 @@ class PipelineParams(BaseModel):
                 "num_speakers": diarizen.get("num_speakers"),
                 "min_speakers": diarizen.get("min_speakers"),
                 "max_speakers": diarizen.get("max_speakers"),
+                # A missing key yields None, which is exactly the "inherit the
+                # model's own config.toml" sentinel -- no branching needed.
+                "diarizen_segmentation_step": diarizen.get("segmentation_step"),
+                "diarizen_batch_size": diarizen.get("batch_size"),
+                "diarizen_apply_median_filtering": diarizen.get(
+                    "apply_median_filtering"
+                ),
+                "diarizen_resident": diarizen.get("resident", True),
+                # These two were declared on DiarizationParams but never mapped
+                # here, so no config file could ever change them. Wired now
+                # because resident mode enforces the timeout per REQUEST rather
+                # than per process, making the values actually matter.
+                "timeout_base_seconds": diarizen.get("timeout_base_seconds", 300),
+                "timeout_per_audio_second": diarizen.get(
+                    "timeout_per_audio_second", 6.0
+                ),
             },
             "embedding_refinement": {
                 "enable": embedding.get("enable", True),
